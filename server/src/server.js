@@ -1,50 +1,56 @@
-import 'dotenv/config';
+import "dotenv/config";
 
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import cors from 'cors';
-import authRoutes from './routes/authRoutes.js';
-import { connectDb, disconnectDb } from './config/db.js';
-import { connectRedis, disconnectRedis } from './config/redis.js';
-import { startSweeper, stopSweeper } from './jobs/sweeper.js';
+import { once } from "node:events";
+import app from "./app.js";
+import { connectDb, disconnectDb } from "./config/db.js";
+import { connectRedis, disconnectRedis } from "./config/redis.js";
+import { startSweeper, stopSweeper } from "./jobs/sweeper.js";
+import { log, setLogger } from "./lib/log.js";
+import logger from "./lib/logger.js";
 
-const app = express();
-
-app.use(express.json());
-app.use(cookieParser());
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    credentials: true,
-  })
-);
-
-// Every API route lives under /api/v1 (architecture.md §6); the client's axios baseURL is '/api/v1'.
-app.use('/api/v1/auth', authRoutes);
-
+setLogger(logger);
 const PORT = process.env.PORT || 5000;
+let server;
+let shuttingDown = false;
+let shutdownPromise;
 
-// MongoDB is required. Redis isn't: without it the API still starts, with no cache, and bookings
-// answer 503 until it reconnects. The sweeper starts after MongoDB, because it queries bookings.
-async function start() {
-  await connectDb();
-  await connectRedis();
-  startSweeper();
-  const server = app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
-
-  // Render sends SIGTERM on every deploy and restart; Ctrl+C sends SIGINT.
-  const shutdown = async (signal) => {
-    console.log(`${signal} received, shutting down`);
-    server.close();
-    await stopSweeper();
+async function shutdown(signal, error) {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  shutdownPromise = (async () => {
+    if (error) logger.fatal({ err: { name: error.name, code: error.code, stack: error.stack } }, "Fatal process error");
+    else logger.info({ signal }, "Shutdown requested");
+    const forceExit = setTimeout(() => {
+      logger.error("Graceful shutdown timed out; forcing exit");
+      process.exit(1);
+    }, 10000);
+    forceExit.unref();
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    await stopSweeper().catch((closeError) => logger.error({ err: closeError }, "Sweeper shutdown failed"));
     await Promise.allSettled([disconnectRedis(), disconnectDb()]);
-    process.exit(0);
-  };
-  process.once('SIGTERM', shutdown);
-  process.once('SIGINT', shutdown);
+    clearTimeout(forceExit);
+    if (error) process.exitCode = 1;
+  })();
+  return shutdownPromise;
 }
 
-start().catch((err) => {
-  console.error(`Startup failed: ${err.message}`);
-  process.exit(1);
+process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.once("SIGINT", () => { void shutdown("SIGINT"); });
+process.once("uncaughtException", (error) => { void shutdown("uncaughtException", error); });
+process.once("unhandledRejection", (reason) => {
+  const error = reason instanceof Error ? reason : new Error("Unhandled promise rejection");
+  void shutdown("unhandledRejection", error);
 });
+
+async function start() {
+  await connectDb();
+  if (shuttingDown) return;
+  await connectRedis({ logger });
+  if (shuttingDown) return;
+  startSweeper();
+  server = app.listen(PORT, () => logger.info({ port: PORT }, "HTTP server listening"));
+  server.once("error", (error) => { void shutdown("serverError", error); });
+  await once(server, "listening");
+}
+
+start().catch((error) => { void shutdown("startupFailure", error); });

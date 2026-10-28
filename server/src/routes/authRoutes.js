@@ -22,6 +22,7 @@ const DEMO_USER = {
 router.post('/demo-login', (req, res) => {
   const { accessToken, refreshToken } = generateTokens(DEMO_USER);
   refreshTokensDB.add(refreshToken);
+  req.log.info({ event: 'auth.demo_login.succeeded' }, 'Demo authentication succeeded');
 
   res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTIONS);
   return res.status(200).json({
@@ -37,11 +38,13 @@ router.post('/login', async (req, res) => {
   const user = users.find((u) => u.username === username);
 
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    req.log.warn({ event: 'auth.login.failed' }, 'Authentication failed');
+    return res.status(401).json({ error: 'Invalid credentials', requestId: req.id });
   }
 
   const { accessToken, refreshToken } = generateTokens(user);
   refreshTokensDB.add(refreshToken);
+  req.log.info({ event: 'auth.login.succeeded' }, 'Authentication succeeded');
 
   res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTIONS);
   return res.status(200).json({
@@ -55,7 +58,7 @@ router.post('/refresh', (req, res) => {
   const incomingToken = req.cookies.refreshToken;
 
   if (!incomingToken) {
-    return res.status(401).json({ error: 'Refresh token missing' });
+    return res.status(401).json({ error: 'Refresh token missing', requestId: req.id });
   }
 
   // Token Reuse Detection
@@ -64,11 +67,11 @@ router.post('/refresh', (req, res) => {
     try {
       const decoded = jwt.verify(incomingToken, process.env.REFRESH_TOKEN_SECRET);
       // In production: invalidate ALL tokens belonging to decoded.id
-      console.warn(`Potential token reuse attack by user ${decoded.id}`);
+      req.log.warn({ event: 'auth.refresh.reuse_detected', userId: decoded.id }, 'Refresh token reuse detected');
     } catch (_) { }
 
     res.clearCookie('refreshToken', REFRESH_COOKIE_OPTIONS);
-    return res.status(403).json({ error: 'Token revoked or already used' });
+    return res.status(403).json({ error: 'Token revoked or already used', requestId: req.id });
   }
 
   // Verify the valid incoming token
@@ -76,7 +79,7 @@ router.post('/refresh', (req, res) => {
     if (err) {
       refreshTokensDB.delete(incomingToken);
       res.clearCookie('refreshToken', REFRESH_COOKIE_OPTIONS);
-      return res.status(403).json({ error: 'Invalid or expired refresh token' });
+      return res.status(403).json({ error: 'Invalid or expired refresh token', requestId: req.id });
     }
 
     // ROTATION: Delete the old refresh token
