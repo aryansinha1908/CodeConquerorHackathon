@@ -3,8 +3,8 @@ node_modules/
 .pnp
 .pnp.js
 
-# Environment Variables & Secrets
-server/.env
+# Environment Variables & Secrets (every directory: server/.env, client/.env, …)
+.env
 .env.local
 .env.development.local
 .env.test.local

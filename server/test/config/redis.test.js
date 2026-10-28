@@ -43,7 +43,10 @@ describe("getRedis", () => {
 
 describe("when Redis is down", () => {
   test("connectRedis resolves false and logs one error instead of throwing", async () => {
-    const { result, ms } = await timed(() => connectRedis({ timeoutMs: 2000 }));
+    // With the app's logger, as server.js calls it.
+    const { result, ms } = await timed(() =>
+      connectRedis({ logger, timeoutMs: 2000 }),
+    );
     assert.equal(result, false);
     assert.ok(ms < 2500, `${ms} ms`);
     assert.equal(logged.error.length, 1);

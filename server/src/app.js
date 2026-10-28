@@ -1,8 +1,10 @@
-import 'dotenv/config';
-
+// The Express app without a listener, so tests can mount it. server.js loads .env, connects the
+// databases and listens.
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import mongoose from 'mongoose';
+import { pingRedis } from './config/redis.js';
 import authRoutes from './routes/authRoutes.js';
 import { requestIdMiddleware } from './middleware/requestLogger.js';
 import { httpLogger } from './middleware/httpLogger.js';
@@ -27,8 +29,18 @@ app.use(
 
 app.use('/api/v1/auth', authRoutes);
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', requestId: req.id });
+// architecture.md §13.3: 503 only when MongoDB is down. Without Redis the API still serves, with no
+// cache and bookings answering 503 (§10.2), so Redis being down is "degraded", not down.
+app.get('/health', async (req, res) => {
+  const mongo = mongoose.connection.readyState === 1 ? 'up' : 'down';
+  const redis = (await pingRedis()) ? 'up' : 'degraded';
+  res.status(mongo === 'up' ? 200 : 503).json({
+    status: mongo === 'up' ? 'ok' : 'down',
+    mongo,
+    redis,
+    uptime: Math.round(process.uptime()),
+    requestId: req.id,
+  });
 });
 
 app.use(notFoundHandler);

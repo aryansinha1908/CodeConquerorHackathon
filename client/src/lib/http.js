@@ -42,9 +42,13 @@ http.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config;
+    // Error envelope (architecture.md §6): { success: false, error: { code, message, details }, requestId }.
+    // The mock auth routes still answer { error: "text" }, so a string error is read as the message.
+    const data = err.response?.data ?? {};
+    const error = data.error && typeof data.error === 'object' ? data.error : {};
     if (
       err.response?.status === 401 &&
-      err.response?.data?.code === 'UNAUTHENTICATED' &&
+      error.code === 'UNAUTHENTICATED' &&
       !original._retried
     ) {
       original._retried = true;
@@ -52,12 +56,15 @@ http.interceptors.response.use(
       return http(original);
     }
     // Normalise error shape
-    const data = err.response?.data ?? {};
     const normalised = {
       status: err.response?.status ?? 0,
-      code: data.code ?? 'UNKNOWN',
-      message: data.message ?? err.message ?? 'Something went wrong',
-      details: data.details ?? [],
+      code: error.code ?? 'UNKNOWN',
+      message:
+        error.message ??
+        (typeof data.error === 'string' ? data.error : undefined) ??
+        err.message ??
+        'Something went wrong',
+      details: error.details ?? [],
       requestId: data.requestId ?? null,
     };
     return Promise.reject(normalised);

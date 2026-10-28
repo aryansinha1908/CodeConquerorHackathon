@@ -307,6 +307,7 @@ Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 | `NOT_FOUND`           | 404         |
 | `SLOT_TAKEN`          | 409         |
 | `INVALID_TRANSITION`  | 409         |
+| `CONFLICT`            | 409         |
 | `INELIGIBLE`          | 422         |
 | `RATE_LIMITED`        | 429         |
 | `AI_QUOTA_EXCEEDED`   | 429         |
@@ -733,7 +734,7 @@ This is separate from application logs. App logs are for **engineers** and get r
 
 ### 13.3 Health
 
-`GET /health` returns `200 { status: "ok", mongo: "up", redis: "up", uptime }`. It returns `503` if Mongo is down. If only Redis is down it still returns 200 with `redis: "degraded"`, because the app can run without Redis (§10.2). The keep-alive pinger calls it.
+`GET /health` returns `200 { status: "ok", mongo: "up", redis: "up", uptime, requestId }`. It returns `503` with `status: "down", mongo: "down"` if Mongo is down. If only Redis is down it still returns 200 with `redis: "degraded"`, because the app can run without Redis (§10.2). The keep-alive pinger calls it.
 
 ---
 
