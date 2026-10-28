@@ -355,7 +355,7 @@ export const TRANSITIONS = {
 
 `bookingService.transition(bookingId, action, actor, payload)` does five things:
 1. Loads the booking.
-2. Checks `from`, the actor's relation (`borrower`, `unitManager`, `admin`, `system`), the reason requirement and the time window (check-in is allowed only from 15 min before `start`).
+2. Checks `from`, the actor's relation (`borrower`, `unitManager`, `admin`, `system`), the reason requirement and the time window (check-in is allowed only from 15 min before `start`). A manager can't approve, reject, waitlist or confirm the return of **their own** booking; another manager of the unit or an admin must.
 3. Applies the change with a **conditional update**: `findOneAndUpdate({ _id, status: from })`. If a concurrent change already moved the booking, this returns `INVALID_TRANSITION` (409).
 4. Calls `auditService.record()`.
 5. Calls `notifyService.send()` and, for slot-freeing transitions, `waitlistService.promote()`.
