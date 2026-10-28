@@ -68,8 +68,14 @@ const ROLL_NUMBER =
 const USER_VIEW_DEPARTMENT = { path: "department", select: "code name" };
 
 export const demoMode = () => process.env.DEMO_MODE === "true";
-const isDemoAccount = (user) =>
+// Emails are stored lower-cased, so the suffix is enough. Also used by services that keep demo
+// sessions away from real members' data (verificationService).
+export const isDemoAccount = (user) =>
   String(user.email).endsWith(`@${DEMO_DOMAIN}`);
+// The same test as a query on User.email.
+export const DEMO_EMAIL = new RegExp(
+  `@${DEMO_DOMAIN.replaceAll(".", "\\.")}$`,
+);
 
 export function allowedDomains() {
   const list = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")

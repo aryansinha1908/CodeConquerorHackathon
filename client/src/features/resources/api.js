@@ -48,14 +48,14 @@ export async function getResource(id) {
   }
 }
 
-/** GET /org-units */
+/**
+ * The units of Explore's filter: the mock ones until Phase 4 mounts /resources. getResources still
+ * falls back to MOCK_RESOURCES and filters them by these ids; the real GET /org-units answers with
+ * ObjectIds that no mock resource has, so every unit would show the empty state. Phase 4 switches
+ * both to the API together (the verification form already uses GET /org-units, under its own key).
+ */
 export async function getOrgUnits() {
-  try {
-    const res = await http.get('/org-units');
-    return res.data;
-  } catch (err) {
-    return { status: 'success', data: MOCK_ORG_UNITS };
-  }
+  return { status: 'success', data: MOCK_ORG_UNITS };
 }
 
 /** GET /resources/:id/availability */

@@ -352,7 +352,11 @@ A wrong email or password is `401 INVALID_CREDENTIALS` with the same message for
 | GET    | `/verification/status`                 | auth                  | —                                                                        | `general` | —     |
 | GET    | `/admin/verifications`                 | admin                 | `status=pending\|approved\|rejected, page, limit`                        | `general` | —     |
 | GET    | `/admin/verifications/:userId/id-card` | admin                 | — (returns a 5-min signed URL; **audited**)                              | `general` | —     |
-| PATCH  | `/admin/verifications/:userId`         | admin                 | `decision: approve\|reject, reason, memberType, department`              | `general` | —     |
+| PATCH  | `/admin/verifications/:userId`         | admin                 | `decision: approve\|reject, submittedAt, reason, memberType, department` | `general` | —     |
+
+- `submittedAt` is the reviewed queue item's own value. If the member has replaced the card since, the decision is 409, so a decision never lands on a card the admin didn't see.
+- A decision deletes the ID image first; if Cloudinary can't delete it, the answer is 503 and nothing is saved.
+- The ID-card link is a Cloudinary download URL that expires within 5 minutes, sent with `Cache-Control: no-store`; every view is audited as `verification.id_viewed`.
 
 **OrgUnits**
 
@@ -848,7 +852,7 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 | Least data      | Managers see a borrower's name, member type, department and history with _their own_ unit, never email-derived roll numbers or ID images; availability endpoints show "busy" blocks with no names |
 | ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision                                                                                       |
 | Human oversight | Rejections, waitlisting, cancellations by managers, incident outcomes and suspensions all need a human actor plus a written reason; strikes only _suggest_ suspension to an admin                 |
-| Demo data       | All fictional; seeded accounts on a `.test` domain; no real NIT JSR personal data                                                                                                                 |
+| Demo data       | All fictional; seeded accounts on a `.test` domain; no real NIT JSR personal data. The public demo admin can only see and review demo accounts, never real users' ID cards                       |
 | Third-party AI  | Free-tier caveat disclosed; no PII sent (§15.3)                                                                                                                                                   |
 
 ---

@@ -18,6 +18,7 @@ import VerifyOtpPage from '../features/auth/VerifyOtpPage';
 const ExplorePage = lazy(() => import('../pages/ExplorePage'));
 const ResourceDetailPage = lazy(() => import('../pages/ResourceDetailPage'));
 const VerificationPage = lazy(() => import('../features/verification/VerificationPage'));
+const VerificationQueuePage = lazy(() => import('../features/admin/VerificationQueuePage'));
 import {
   BookingsPlaceholder,
   BadgesPlaceholder,
@@ -144,6 +145,14 @@ export const router = createBrowserRouter([
           {
             index: true,
             element: <AdminPlaceholder />,
+          },
+          {
+            path: 'verifications',
+            element: (
+              <Suspense fallback={<PageFallback />}>
+                <VerificationQueuePage />
+              </Suspense>
+            ),
           },
           {
             path: '*',

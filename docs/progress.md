@@ -55,7 +55,7 @@ The running record of what's built, what was decided and what's left. Read this 
 |---|---|---|
 | B-01 | Domain-restricted registration + email OTP | ✅ Phase 1: `authService` + `authOtp` (peppered sha256 in Redis, 10 min, 5 tries), nodemailer (`config/mailer.js`), sign-up proof cookie |
 | B-02 | Email-pattern hints | ✅ Phase 1: `emailHints()` fills `User.emailHints` on register |
-| B-03 | ID-card upload + admin verification | ❌ Not started (model fields exist) |
+| B-03 | ID-card upload + admin verification | ✅ Phase 2: `uploadService` (type from the bytes, 5 MB, private delivery for ID cards and evidence), `verificationService`, `/verification/*` and `/admin/verifications/*`, the member and admin pages |
 | B-04 | JWT auth + demo login | ✅ Phase 1: login by email, access token with the §7.1 claims, refresh-token families in Redis with rotation and per-family reuse detection, demo login gated by `DEMO_MODE`. The mock is deleted |
 | B-05 | RBAC + unit scope | 🟡 Scope enforced inside the services (`services/access.js`, state-machine relations); route middleware pending |
 | B-06 | Zod validation + error envelope | 🟡 The error handler sends the `architecture.md` §6 envelope (ZodError, CastError, ValidationError, E11000 and body-parser errors mapped). No `validate()` or Zod schemas yet (teammate) |
@@ -263,7 +263,7 @@ The high-severity fixes:
 The goal is the judge script (`frontend.md` §11) working on localhost with real data and no mocks, then deployed. Each phase runs as one multi-agent workflow: builders on separate files, then backend, security, contract (and, for client phases, frontend and design) reviewers on the combined diff, then fixers who reproduce each finding before fixing it, then the test gate.
 
 1. ✅ **Phase 1: real auth and the seed script.** 21 review findings: 15 fixed, 4 duplicates, 2 deferred (below). 515 server tests, plus 6 new client tests.
-2. **Phase 2: uploads (Cloudinary) and ID verification**, server and client, plus `/admin/verifications`.
+2. ✅ **Phase 2: uploads (Cloudinary) and ID verification**, server and client, plus `/admin/verifications`. 23 review findings: 18 fixed, 4 duplicates, 1 needed a client change (made). 573 server tests and 44 client tests. Real Cloudinary isn't exercised yet: the keys go in `server/.env`.
 3. **Phase 3: domain routers** over the existing services, badges first (for the frontend teammate).
 4. **Phase 4: the client on real data**: mocks removed, the existing pages fixed to the backend schema, and the missing pages in judge-script order, plus seeded bookings and an API golden-path script.
 5. **Phase 5: hardening and deploy** (Render, Vercel, Atlas, Upstash).

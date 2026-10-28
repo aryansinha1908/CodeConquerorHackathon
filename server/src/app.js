@@ -7,6 +7,10 @@ import helmet from 'helmet';
 import mongoose from 'mongoose';
 import { pingRedis } from './config/redis.js';
 import authRoutes from './routes/auth.js';
+import adminRoutes from './routes/admin.js';
+import orgUnitRoutes from './routes/orgUnits.js';
+import uploadRoutes from './routes/uploads.js';
+import verificationRoutes from './routes/verification.js';
 import { requestIdMiddleware } from './middleware/requestLogger.js';
 import { httpLogger } from './middleware/httpLogger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -30,7 +34,11 @@ app.use(
 );
 
 app.use('/api/v1/auth', authRoutes);
-// The domain routers (resources, bookings, …) are mounted here in Phase 3, each behind verifyAuth.
+// Each router applies its own verifyAuth, limiters and blockSuspended. More are mounted in Phase 3.
+app.use('/api/v1/org-units', orgUnitRoutes);
+app.use('/api/v1/uploads', uploadRoutes);
+app.use('/api/v1/verification', verificationRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 // architecture.md §13.3: 503 only when MongoDB is down. Without Redis the API still serves, with no
 // cache and bookings answering 503 (§10.2), so Redis being down is "degraded", not down.

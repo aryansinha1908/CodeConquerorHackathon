@@ -167,6 +167,24 @@ const TEMPLATES = {
     ),
     link: "/badges",
   }),
+  // architecture.md §8: the member's ID-card decision; also emailed by verificationService.
+  "verification.approved": () => ({
+    title: "ID card verified",
+    body: "Your ID card is verified. You can now book resources and request badges.",
+    link: "/verification",
+  }),
+  // The reason can be 500 characters, as long as a body may be, so the text is cut to fit rather than
+  // refused by the model (which would lose the notification).
+  "verification.rejected": (d) => {
+    const body =
+      "Your ID card wasn't verified. Upload a new one to try again." +
+      (d.reason ? ` Reason: ${d.reason}` : "");
+    return {
+      title: "ID card not verified",
+      body: body.length > 500 ? `${body.slice(0, 499)}…` : body,
+      link: "/verification",
+    };
+  },
   "incident.created": (d) => ({
     title: "Incident reported",
     body: `A ${d.severity}-severity ${d.type} incident was reported for ${d.resourceTitle}.`,
