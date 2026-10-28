@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import RedisMock from "ioredis-mock";
+import { connectDb } from "../../src/config/db.js";
 import { useRedisClient } from "../../src/config/redis.js";
 import { setLogger } from "../../src/lib/log.js";
 import {
@@ -155,7 +156,9 @@ export async function seed() {
 // Call inside the top-level describe. onSeed receives fresh fixtures before every test.
 export function useTestDatabase(onSeed) {
   before(async () => {
-    await mongoose.connect(uri, {
+    // Same connection settings as the server (strictQuery: "throw").
+    await connectDb({
+      uri,
       dbName: `campuscommons_test_${randomUUID().slice(0, 8)}`,
     });
     await Promise.all(
