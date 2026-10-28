@@ -426,7 +426,7 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 
 | Method | Path                          | Auth | Body / query          | Rate tier | Cache |
 | ------ | ----------------------------- | ---- | --------------------- | --------- | ----- |
-| GET    | `/notifications`              | auth | `unread?, page`       | `general` | —     |
+| GET    | `/notifications`              | auth | `unread?, page, limit` → `meta.unread` too | `general` | —     |
 | GET    | `/notifications/unread-count` | auth | — (polled every 30 s) | `general` | —     |
 | PATCH  | `/notifications/:id/read`     | auth | —                     | `general` | —     |
 | PATCH  | `/notifications/read-all`     | auth | —                     | `general` | —     |
@@ -435,7 +435,7 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 
 | Method | Path                       | Auth                              | Body / query                                                                                                        | Rate tier | Cache     |
 | ------ | -------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
-| GET    | `/audit`                   | admin (all) / manager (own units) | `entityType, entityId, actorId, action, from, to, page`                                                             | `general` | —         |
+| GET    | `/audit`                   | admin (all) / manager (own units) | `entityType, entityId, actorId, action, orgUnit, from, to` (`[from, to)`), `page, limit`; entries with no unit are admin-only | `general` | —         |
 | POST   | `/uploads/images`          | verified                          | multipart `images` (≤ 3, jpg/png/webp, ≤ 5 MB each) → `[{url, publicId}]`                                           | `upload`  | —         |
 | GET    | `/admin/users`             | admin                             | `q, role, verification, page`                                                                                       | `general` | —         |
 | PATCH  | `/admin/users/:id/roles`   | admin                             | `roles[], managedOrgUnits[]`                                                                                        | `general` | —         |

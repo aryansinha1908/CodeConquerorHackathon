@@ -2,11 +2,11 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, at `af94132` (PR #7 merged into `main`, after the teammate's pino work in PR #6). The post-merge review fixes (§2, last row) are in the working tree, **not yet committed**.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `6d62cf3` (the post-merge review fixes). `main` has everything through PR #8 (`4ae34a9`). The notification and audit reads (§2, last row) are in the working tree, **not yet committed**.
 
 **Tests:**
-- `npm test` (`node --test`, every file): **236 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
-- With a real MongoDB: **404 pass** (168 of them integration), run twice in a row with no flaky failures.
+- `npm test` (`node --test`, every file): **240 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
+- With a real MongoDB: **417 pass** (177 of them integration), run twice in a row with no flaky failures.
 
 ---
 
@@ -39,7 +39,8 @@ The running record of what's built, what was decided and what's left. Read this 
 | `9294dac` | **Badge service** (B-09): catalogue, create, `/badges/mine`, request with evidence, the manager queue, approve/reject, direct grant, with tests for the judges' golden path and for races. A mutation check broke 23 guards on purpose, and a test failed for every one |
 | `46da3d6` | **Incident service** (B-16): report, list, detail, comments, resolve; resolving the last open incident of a flagged booking closes it. Mutation check: 30 guards broken on purpose, 29 caught. The survivor only drops a projection that keeps comment text out of list reads, which nothing can observe |
 | `a81ae2f` | (Teammate, PR #6) **pino logging:** `lib/logger.js` with redaction, `X-Request-Id`, the HTTP log, `app.js` split from `server.js`, graceful shutdown, a first error handler |
-| _uncommitted_ | **Post-merge review fixes:** the server crashed at boot (`setRedisLogger` ReferenceError in `connectRedis`, reached once `server.js` passed a logger); `npm test` ran 7 of 226 tests; `.gitignore` only ignored `server/.env`; the error handler dropped `code`, `details` and `headers` and turned every 400 into "Invalid request"; `verifyAuth` had no `UNAUTHENTICATED` code; `/health` said ok with MongoDB down; the request log's route was always "[unmatched route]" |
+| `6d62cf3` | **Post-merge review fixes** (PR #8): the server crashed at boot (`setRedisLogger` ReferenceError in `connectRedis`, reached once `server.js` passed a logger); `npm test` ran 7 of 226 tests; `.gitignore` only ignored `server/.env`; the error handler dropped `code`, `details` and `headers` and turned every 400 into "Invalid request"; `verifyAuth` had no `UNAUTHENTICATED` code; `/health` said ok with MongoDB down; the request log's route was always "[unmatched route]" |
+| _uncommitted_ | **Notification and audit reads** (B-18, B-19): `listNotifications` (with the unread count in `meta`), `unreadCount`, `markRead`, `markAllRead`, and `listAudit` scoped by role; `services/params.js` for shared input checks. Mutation check: 19 guards broken on purpose, all caught |
 
 ---
 
@@ -66,8 +67,8 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-15 | Condition reports | ✅ Service done |
 | B-16 | Incidents + human resolution | ✅ Service done (`incidentService`) |
 | B-17 | Cron sweeper | ✅ Wired into `server.js` |
-| B-18 | Notifications | 🟡 In-app done; email waits for a mailer; no list/read endpoints yet |
-| B-19 | Audit log + timeline | ✅ Service done; audit query endpoint pending |
+| B-18 | Notifications | 🟡 In-app sending and reading done (list, unread count, mark read, read all); email waits for a mailer |
+| B-19 | Audit log + timeline | ✅ Service done, including the audit query (`listAudit`) |
 | B-20 | Rate limiting | ✅ Middleware done, **not mounted** yet |
 | B-21 | pino logging, request ids, `/health` | ✅ Teammate's pino logger, request ids and HTTP log (PR #6); `/health` reports MongoDB and Redis as `architecture.md` §13.3 says |
 | B-22 | Seed script | ❌ Teammate |
@@ -89,10 +90,13 @@ The running record of what's built, what was decided and what's left. Read this 
 | `services/bookingContext.js`, `bookingTransitions.js`, `bookingViews.js`, `waitlistService.js` | Engine inputs; apply + audit + notify; conflict groups and timeline text; promotion |
 | `services/resourceService.js` | `listResources`, `getResource`, `getAvailability`, `getEligibility`, `createResource`, `updateResource`, `setResourceStatus`, `listResourceBookings` |
 | `services/orgUnitService.js` | `listOrgUnits`, `createOrgUnit`, `updateOrgUnit`, `setOrgUnitManagers` |
+| `services/params.js` | Shared input checks: `isId`, `absent`, `assertValid`, `readId`, `readFlag`, `readMatch`, `readInstant`, `readPaging`, `requireUser` |
 | `services/incidentService.js` | `createIncident`, `listIncidents`, `getIncident`, `addComment`, `resolveIncident` |
 | `services/badgeService.js` | `listBadges`, `createBadge`, `listMyBadges`, `requestBadge`, `listBadgeRequests`, `decideBadgeRequest`, `grantBadge`, `badgeState` |
 | `services/access.js` | `isAdmin`, `managesUnit`, `requireAdmin`, `requireUnitManager`, `auditRole` (moved here from `resourceService`) |
-| `services/auditService.js`, `notifyService.js`, `cacheService.js`, `aiQuotaService.js` | Cross-cutting services |
+| `services/auditService.js` | `record`, `listAudit` |
+| `services/notifyService.js` | `send`, `render`; `listNotifications`, `unreadCount`, `markRead`, `markAllRead` |
+| `services/cacheService.js`, `aiQuotaService.js` | Cross-cutting services |
 | `jobs/sweeper.js` | `runSweep`, `startSweeper`, `stopSweeper` |
 | `server.js`, `app.js` | Startup and shutdown; the Express app (request id, HTTP log, JSON, cookies, CORS, routes, `/health`, 404, error handler) without a listener, so tests can mount it |
 | `lib/logger.js`, `middleware/requestLogger.js`, `middleware/httpLogger.js`, `middleware/errorHandler.js` | pino with redaction; `X-Request-Id`; one log record per request with the matched route; the error envelope |
@@ -150,7 +154,15 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 - **Timeline:** `/bookings/:id/timeline` now has an `event: "resolved"` item with the outcome next to each incident's `opened` item.
 - **Audit actions:** `incident.created`, `incident.commented` (with the `open → in_review` change when it happens) and `incident.resolved` (rationale as `reason`, outcome and any new strike count in `meta`).
 
+**Notifications and the audit log**
+- **Each user reads only their own notifications.** Someone else's id is 404, the same as one that doesn't exist. Marking a notification read again keeps its first `readAt`. Reads aren't audited.
+- **`unreadCount` does no user lookup:** every open tab polls it every 30 s, so it's one count on a new `{ user, readAt }` index. An unknown id just has 0; a malformed one is 404.
+- **`listNotifications` returns `meta.unread`** whatever the filter, so the centre can update the bell without a second request.
+- **`listAudit`:** admins read everything; a manager reads only entries whose `orgUnit` they manage (their role is checked too, as in `access.js`). Entries with no unit, such as user and verification events, are therefore admin-only. Members get 403 pointing them to the booking timeline, as in `architecture.md` §7.2.
+- **Audit filters:** `entityType`, `entityId`, `actorId`, `action` (exact), `orgUnit` (added, for managers of several units), and `from` / `to` as `[from, to)` on `at`; newest first. Actors come with their name only; `prevHash` / `hash` (C-02) stay out.
+
 ---
+
 
 ## 6. Gaps the teammates need to close (from the integration review)
 
@@ -233,13 +245,13 @@ The high-severity fixes:
 - **Badge evidence upload:** the controller must upload the file (`uploadService`, not built yet) before it calls `requestBadge`, so an upload for a request the service then refuses is left orphaned in Cloudinary. Either check first with a cheap read, or delete the asset on a refusal.
 - **Incident strikes aren't transactional either:** a failed strike increment after the incident is resolved leaves the strike uncounted, and a retry only answers 409.
 - **Incident photos** come from the upload service (not built), like badge evidence.
-- **Shared parameter helpers:** `resourceService`, `badgeService` and `incidentService` each carry their own copies of `requireUser`, `readPaging`, `readEnum` and friends. Worth pulling into one module before the controllers land.
+- **Shared parameter helpers:** `services/params.js` exists, and the notification and audit reads use it. `resourceService`, `badgeService` and `incidentService` still carry their own copies of `requireUser`, `readPaging`, `readId` and friends; moving them over is mechanical, best done before the controllers land.
 - **No badge revoke action yet.** The `revoked` status is supported everywhere it's read, but nothing sets it. It isn't in the route table either.
 
 ---
 
 ## 11. Next steps (resume here)
 
-1. **Notifications and audit read endpoints** (list, mark read, audit query).
-2. **Routes and controllers** for everything above, badges and incidents, once the validators and auth middleware land.
+1. **Move the older services onto `services/params.js`** (mechanical; the test suites cover it).
+2. **Routes and controllers** for resources, org units, bookings, badges, incidents, notifications and the audit log, once the validators and real-user auth land.
 3. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
