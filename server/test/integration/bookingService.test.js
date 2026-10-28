@@ -6,6 +6,7 @@ import {
   AuditLog,
   Booking,
   ConditionReport,
+  Incident,
   User,
   UserBadge,
 } from "../../src/models/index.js";
@@ -782,6 +783,112 @@ describe("bookingService", { skip }, () => {
       assert.equal(
         (await failure(getTimeline(booking._id, f.student2._id))).code,
         "FORBIDDEN",
+      );
+    });
+  });
+
+  describe("malformed ids", () => {
+    // A :id from the URL or a resourceId from the body reaches the service as typed. Something that
+    // can't be an id names nothing, so it is 404 like an id that matches nothing, not a CastError
+    // (400 "_id") or an operator object reaching a query.
+    test("a booking or resource id that isn't an ObjectId is 404 NOT_FOUND", async () => {
+      const { booking } = await book(f.student);
+      const slot = { ...TUE, purpose: "Printing parts for the robotics club" };
+      const attempts = {
+        checkBooking: () =>
+          checkBooking(f.student._id, { ...slot, resourceId: "printer" }, opts),
+        createBooking: () => bookAs(f.student2, { _id: { $ne: null } }, TUE),
+        transition: () =>
+          transition("not-a-booking", "cancel", f.student._id, {}, opts),
+        checkIn: () =>
+          checkIn("not-a-booking", f.student._id, checklistOk(), opts),
+        checkOut: () =>
+          checkOut({ $gt: "" }, f.student._id, checklistOk(), opts),
+        confirmReturn: () =>
+          confirmReturn("not-a-booking", f.manager._id, { outcome: "ok" }),
+        getBooking: () => getBooking("not-a-booking", f.student._id),
+        getTimeline: () => getTimeline("1234", f.student._id),
+      };
+      for (const [name, attempt] of Object.entries(attempts)) {
+        const err = await failure(attempt());
+        assert.deepEqual(
+          [err.status, err.code],
+          [404, "NOT_FOUND"],
+          `${name}: ${err.message}`,
+        );
+      }
+      assert.equal(await Booking.countDocuments(), 1);
+      assert.equal(
+        (await Booking.findById(booking._id).lean()).status,
+        "pending",
+      );
+    });
+  });
+
+  describe("a failure after the booking update", () => {
+    // The booking is written first, then the audit entry. If that fails (a transient MongoDB error),
+    // the report and incident the booking now points to must stay: deleting them would leave a
+    // flagged booking that no incident resolution can ever close.
+    test("keeps the report and incident the booking points to", async (t) => {
+      const { booking } = await book(f.student);
+      await transition(booking._id, "approve", f.manager._id, {}, opts);
+      await checkIn(booking._id, f.student._id, checklistOk(), {
+        now: plus(TUE.start, -10),
+      });
+      await checkOut(booking._id, f.student._id, checklistOk(), {
+        now: TUE.end,
+      });
+      AuditLog.create = async () => {
+        throw new Error("connection reset");
+      };
+      t.after(() => delete AuditLog.create);
+      const err = await failure(
+        confirmReturn(
+          booking._id,
+          f.manager._id,
+          {
+            outcome: "issue",
+            ...checklistOk(),
+            incident: {
+              type: "damage",
+              severity: "low",
+              description: "The nozzle is cracked badly here",
+            },
+          },
+          { now: TUE.end },
+        ),
+      );
+      delete AuditLog.create;
+      assert.equal(err.message, "connection reset");
+      const saved = await Booking.findById(booking._id).lean();
+      assert.equal(saved.status, "flagged");
+      assert.equal(saved.incidents.length, 1);
+      assert.ok(await Incident.exists({ _id: saved.incidents[0] }));
+      assert.ok(
+        await ConditionReport.exists({ _id: saved.returnConfirmation.report }),
+      );
+    });
+
+    test("a refused update still removes what the request created", async () => {
+      const { booking } = await book(f.student);
+      await transition(booking._id, "approve", f.manager._id, {}, opts);
+      await checkIn(booking._id, f.student._id, checklistOk(), {
+        now: plus(TUE.start, -10),
+      });
+      // As if someone else moved it on meanwhile: the conditional update matches nothing.
+      const original = Booking.findOneAndUpdate;
+      Booking.findOneAndUpdate = function (...args) {
+        Booking.findOneAndUpdate = original;
+        return original.call(this, { _id: null }, ...args.slice(1));
+      };
+      const err = await failure(
+        checkOut(booking._id, f.student._id, checklistOk(), { now: TUE.end }),
+      );
+      Booking.findOneAndUpdate = original;
+      assert.equal(err.code, "INVALID_TRANSITION");
+      assert.equal(
+        await ConditionReport.countDocuments({ phase: "check_out" }),
+        0,
       );
     });
   });

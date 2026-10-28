@@ -173,18 +173,13 @@ const TEMPLATES = {
     body: "Your ID card is verified. You can now book resources and request badges.",
     link: "/verification",
   }),
-  // The reason can be 500 characters, as long as a body may be, so the text is cut to fit rather than
-  // refused by the model (which would lose the notification).
-  "verification.rejected": (d) => {
-    const body =
+  "verification.rejected": (d) => ({
+    title: "ID card not verified",
+    body:
       "Your ID card wasn't verified. Upload a new one to try again." +
-      (d.reason ? ` Reason: ${d.reason}` : "");
-    return {
-      title: "ID card not verified",
-      body: body.length > 500 ? `${body.slice(0, 499)}…` : body,
-      link: "/verification",
-    };
-  },
+      (d.reason ? ` Reason: ${d.reason}` : ""),
+    link: "/verification",
+  }),
   "incident.created": (d) => ({
     title: "Incident reported",
     body: `A ${d.severity}-severity ${d.type} incident was reported for ${d.resourceTitle}.`,
@@ -206,10 +201,18 @@ const TEMPLATES = {
 
 export const NOTIFICATION_EVENTS = Object.keys(TEMPLATES);
 
+// Notification.body's maxlength. A reason may be 500 characters by itself (a booking or badge
+// rejection, a cancellation, an ID card), so a body carrying one is cut to fit rather than refused
+// by the model, which would lose the notification: send() only logs the failure.
+const MAX_BODY = 500;
+
 export function render(event, data) {
   const template = TEMPLATES[event];
   if (!template) throw new Error(`No notification template for "${event}"`);
-  return template(data);
+  const notice = template(data);
+  return notice.body?.length > MAX_BODY
+    ? { ...notice, body: `${notice.body.slice(0, MAX_BODY - 1)}…` }
+    : notice;
 }
 
 // → the created notifications ([] when nothing was sent)

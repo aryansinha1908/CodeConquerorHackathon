@@ -73,9 +73,7 @@ export const demoMode = () => process.env.DEMO_MODE === "true";
 export const isDemoAccount = (user) =>
   String(user.email).endsWith(`@${DEMO_DOMAIN}`);
 // The same test as a query on User.email.
-export const DEMO_EMAIL = new RegExp(
-  `@${DEMO_DOMAIN.replaceAll(".", "\\.")}$`,
-);
+export const DEMO_EMAIL = new RegExp(`@${DEMO_DOMAIN.replaceAll(".", "\\.")}$`);
 
 export function allowedDomains() {
   const list = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")

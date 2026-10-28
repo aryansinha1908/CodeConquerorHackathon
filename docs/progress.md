@@ -264,7 +264,9 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
 
 1. ✅ **Phase 1: real auth and the seed script.** 21 review findings: 15 fixed, 4 duplicates, 2 deferred (below). 515 server tests, plus 6 new client tests.
 2. ✅ **Phase 2: uploads (Cloudinary) and ID verification**, server and client, plus `/admin/verifications`. 23 review findings: 18 fixed, 4 duplicates, 1 needed a client change (made). 573 server tests and 44 client tests. Real Cloudinary isn't exercised yet: the keys go in `server/.env`.
-3. **Phase 3: domain routers** over the existing services, badges first (for the frontend teammate).
+3. ✅ **Phase 3: domain routers** over the existing services: org units, resources, badges and badge requests, bookings, incidents, notifications, audit. Every route is `verifyAuth` → `generalLimiter` (→ `blockSuspended` on writes), with thin controllers and route tests over HTTP. 21 review findings: 13 fixed (among them reasons over 500 characters skipping the audit, confirm-return leaving orphans, 500s on malformed checklist items, look-alike photo URLs from other Cloudinary accounts), 6 duplicates, 2 deferred (below). 649 server tests. The full API reference is `docs/api.md`.
+
+   **Deferred to Phase 4 (new endpoints):** a route for managers to open badge evidence (a 5-minute signed URL, like the ID-card viewer), and a user lookup (`GET /admin/users`) for manager assignment and direct badge grants. Also open: resource `images` on the listing form aren't run through the own-photo check yet.
 4. **Phase 4: the client on real data**: mocks removed, the existing pages fixed to the backend schema, and the missing pages in judge-script order, plus seeded bookings and an API golden-path script.
 5. **Phase 5: hardening and deploy** (Render, Vercel, Atlas, Upstash).
 

@@ -8,7 +8,14 @@ import mongoose from 'mongoose';
 import { pingRedis } from './config/redis.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
+import auditRoutes from './routes/audit.js';
+import badgeRequestRoutes from './routes/badgeRequests.js';
+import badgeRoutes from './routes/badges.js';
+import bookingRoutes from './routes/bookings.js';
+import incidentRoutes from './routes/incidents.js';
+import notificationRoutes from './routes/notifications.js';
 import orgUnitRoutes from './routes/orgUnits.js';
+import resourceRoutes from './routes/resources.js';
 import uploadRoutes from './routes/uploads.js';
 import verificationRoutes from './routes/verification.js';
 import { requestIdMiddleware } from './middleware/requestLogger.js';
@@ -34,8 +41,15 @@ app.use(
 );
 
 app.use('/api/v1/auth', authRoutes);
-// Each router applies its own verifyAuth, limiters and blockSuspended. More are mounted in Phase 3.
+// Each router applies its own verifyAuth, limiters and blockSuspended.
 app.use('/api/v1/org-units', orgUnitRoutes);
+app.use('/api/v1/resources', resourceRoutes);
+app.use('/api/v1/badges', badgeRoutes);
+app.use('/api/v1/badge-requests', badgeRequestRoutes);
+app.use('/api/v1/bookings', bookingRoutes);
+app.use('/api/v1/incidents', incidentRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/uploads', uploadRoutes);
 app.use('/api/v1/verification', verificationRoutes);
 app.use('/api/v1/admin', adminRoutes);

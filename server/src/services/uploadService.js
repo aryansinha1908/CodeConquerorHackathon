@@ -116,14 +116,19 @@ function receiveError(err, field, maxCount) {
 
 // Express middleware: up to maxCount files from the multipart field `field` into req.files (a list),
 // the text fields into req.body. A request that isn't multipart passes through with no req.files.
-export function receiveFiles(field, { maxCount = MAX_FILES } = {}) {
+// fieldSize is in bytes: a route whose service allows n characters of text passes at least 4 * n, so
+// the service's character check decides, the same as for a JSON body.
+export function receiveFiles(
+  field,
+  { maxCount = MAX_FILES, fieldSize = 1024 } = {},
+) {
   const parse = multer({
     storage: multer.memoryStorage(),
     limits: {
       fileSize: MAX_FILE_BYTES,
       files: maxCount,
       fields: 10,
-      fieldSize: 1024,
+      fieldSize,
       fieldNameSize: 100,
       parts: maxCount + 10,
       headerPairs: 100,
@@ -273,4 +278,59 @@ export async function uploadImages(userId, files) {
     message: `Attach 1 to ${MAX_FILES} photos.`,
   });
   return storeFiles(list, "photos", { field: "images", multiple: true });
+}
+
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Exactly the delivery URL storeFiles hands out for a photo, Cloudinary's secure_url:
+// https://res.cloudinary.com/<cloud>/image/upload/v<version>/<publicId>.<format>. The URL must already
+// be in its normal form (url.href is what was sent), so no dot segment, percent-encoded dot or
+// backslash can make a browser resolve it to another account's asset. No query, fragment, user or
+// port, and nothing but the version before the public id: a transformation could overlay or fetch an
+// image from elsewhere.
+function isOurPhoto(photo, cloud) {
+  if (typeof photo?.url !== "string" || typeof photo?.publicId !== "string")
+    return false;
+  if (!photo.publicId) return false;
+  let url;
+  try {
+    url = new URL(photo.url);
+  } catch {
+    return false;
+  }
+  const path = new RegExp(
+    `^/${escapeRegExp(cloud)}/image/upload/(?:v\\d+/)?${escapeRegExp(photo.publicId)}(?:\\.[a-z0-9]+)?$`,
+  );
+  return (
+    url.href === photo.url &&
+    url.protocol === "https:" &&
+    url.host === "res.cloudinary.com" &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash &&
+    path.test(url.pathname)
+  );
+}
+
+// Photos sent back with a condition report or an incident (backend.md §7 "from our own Cloudinary
+// folder"). Each must be a delivery URL of our Cloudinary account for its own public id, so a report
+// can't point at an image hosted elsewhere. Checked by URL rather than folder: in Cloudinary's dynamic
+// folder mode the public id doesn't carry the folder. Without CLOUDINARY_CLOUD_NAME nothing can have
+// been uploaded, so any photo is refused. → problems in the services/params.js shape.
+export function photoProblems(photos, path = "photos") {
+  if (photos == null) return [];
+  if (!Array.isArray(photos)) return [{ path, message: "Must be a list." }];
+  const cloud = process.env.CLOUDINARY_CLOUD_NAME;
+  const problems = [];
+  // A counted loop, so holes in a sparse array are checked too.
+  for (let i = 0; i < photos.length; i++) {
+    const ours = Boolean(cloud) && isOurPhoto(photos[i], cloud);
+    if (!ours)
+      problems.push({
+        path: `${path}.${i}`,
+        message: "Must be a photo uploaded through /uploads/images.",
+      });
+  }
+  return problems;
 }

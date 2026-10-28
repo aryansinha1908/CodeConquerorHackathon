@@ -237,6 +237,25 @@ describe("notification templates", () => {
     );
   });
 
+  // Notification.body is at most 500 characters; a body over it would be refused by the model and
+  // the notice lost, so a long reason (allowed up to 500 on its own) is cut to fit instead.
+  test("a long reason is cut to fit the body, never dropping the notification", () => {
+    const reason = "r".repeat(500);
+    for (const [event, extra] of [
+      ["booking.rejected", {}],
+      ["booking.waitlisted", {}],
+      ["booking.cancelled", { audience: "member" }],
+      ["badge.rejected", {}],
+      ["verification.rejected", {}],
+    ]) {
+      const { body } = render(event, { ...data, ...extra, reason });
+      assert.equal(body.length, 500, event);
+      assert.ok(body.endsWith("r…"), event);
+    }
+    // A body that fits is left as it is.
+    assert.ok(!render("booking.rejected", data).body.endsWith("…"));
+  });
+
   test("an unknown event is an error, not a blank notification", () => {
     assert.throws(
       () => render("booking.teleported", data),

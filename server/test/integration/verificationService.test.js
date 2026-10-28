@@ -246,9 +246,7 @@ describe("verificationService", { skip }, () => {
         [{ decision: "approve", department: "cse" }, ["department"]],
       ];
       for (const [input, paths] of cases) {
-        const err = await failure(
-          decideAs(admin, member, input),
-        );
+        const err = await failure(decideAs(admin, member, input));
         assert.equal(err.status, 400, JSON.stringify(input));
         assert.deepEqual(
           err.details.map((d) => d.path),
@@ -256,9 +254,7 @@ describe("verificationService", { skip }, () => {
           JSON.stringify(input),
         );
       }
-      const notObject = await failure(
-        decideAs(admin, member, "approve"),
-      );
+      const notObject = await failure(decideAs(admin, member, "approve"));
       assert.equal(notObject.status, 400);
       assert.equal(fake.destroyed.length, 0);
       assert.equal((await stored(member)).status, "pending");

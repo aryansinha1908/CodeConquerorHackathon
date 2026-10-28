@@ -70,7 +70,10 @@ const wrongCode = (code) =>
 // One browser: it keeps the sign-up cookie (signupProof) that register and an unverified login set,
 // per address, and sends it with verify-otp, as routes/auth.js does with the real cookie.
 const browser = new Map();
-const normalised = (email) => String(email ?? "").trim().toLowerCase();
+const normalised = (email) =>
+  String(email ?? "")
+    .trim()
+    .toLowerCase();
 
 async function register(input, options) {
   const result = await registerService(input, options);
@@ -277,7 +280,10 @@ describe("auth service", { skip }, () => {
         const err = await failure(signUp({ name }));
         assertError(err, 400, "VALIDATION_ERROR");
         assert.deepEqual(err.details, [
-          { path: "name", message: "Can't contain line breaks or control characters." },
+          {
+            path: "name",
+            message: "Can't contain line breaks or control characters.",
+          },
         ]);
       }
       assert.equal(mails.length, 0);

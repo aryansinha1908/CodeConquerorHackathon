@@ -32,6 +32,7 @@ import { record } from "./auditService.js";
 import { cachedCatalogue, invalidateCatalogue } from "./cacheService.js";
 import { send } from "./notifyService.js";
 import { listOrgUnits } from "./orgUnitService.js";
+import { discardAsset } from "./uploadService.js";
 import {
   absent,
   assertValid,
@@ -389,6 +390,11 @@ export async function requestBadge(
       });
     if (!updated) throw changedMeanwhile();
     rowId = updated._id;
+    // The earlier request's file was referenced by this row alone (the audit log keeps only
+    // hasEvidence), so once it is replaced or cleared nothing could ever find or delete it.
+    const replaced = existing.evidence?.publicId;
+    if (replaced && replaced !== evidence?.publicId)
+      await discardAsset(replaced, "evidence");
   }
 
   await record({
@@ -410,6 +416,17 @@ export async function requestBadge(
     { userName: user.name, badgeName: badge.name, audience: "manager" },
   );
   return memberView(await loadMemberRow(rowId), now);
+}
+
+// For the route, after requestBadge failed: deletes the evidence file it stored for the request,
+// unless a request row points to it (the row was saved and a later step, such as the audit entry,
+// failed). When that can't be checked the file is kept: an orphan can be removed by hand from the
+// log, but a request whose evidence is gone can't be reviewed. → true when the file was deleted.
+export async function releaseEvidence(publicId) {
+  const used = await UserBadge.exists({ "evidence.publicId": publicId }).catch(
+    () => true,
+  );
+  return used ? false : discardAsset(publicId, "evidence");
 }
 
 // ── Manager side ────────────────────────────────────────────────────────────
