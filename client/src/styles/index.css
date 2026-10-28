@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Hacktoberfest palette ── */
+  --color-hf-forest: #183d2d;
+  --color-hf-forest-light: #1e4d38;
+  --color-hf-forest-dark: #112a1f;
+  --color-hf-cream: #f5f0e8;
+  --color-hf-cream-dark: #ede8df;
+  --color-hf-red: #c0392b;
+  --color-hf-red-hover: #a93226;
+  --color-hf-red-light: #e74c3c;
+  --color-hf-amber: #e67e22;
+  --color-hf-amber-light: #f39c12;
+  --color-hf-gold: #f1c40f;
+  --color-hf-teal: #1abc9c;
+  --color-hf-blue-steel: #2980b9;
+  --color-hf-near-black: #1a1a1a;
+  --color-hf-charcoal: #2c2c2c;
+  --color-hf-ink: #1d1d1b;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* ── Radius ── */
+  --radius-card: 0.75rem;   /* rounded-xl */
+  --radius-input: 0.5rem;   /* rounded-lg */
+  --radius-btn: 0.375rem;   /* rounded-md */
+  --radius-chip: 9999px;    /* rounded-full */
+
+  /* ── Borders — Hacktoberfest uses dark bold borders ── */
+  --border-width-ui: 2px;
+  --color-border: #1a1a1a;
+
+  /* ── Shadow ── */
+  --shadow-card: 4px 4px 0px 0px #1a1a1a;
+  --shadow-card-hover: 6px 6px 0px 0px #1a1a1a;
+  --shadow-btn: 3px 3px 0px 0px #1a1a1a;
+  --shadow-btn-hover: 1px 1px 0px 0px #1a1a1a;
+}
+
+/* ── Global resets ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-hf-cream);
+  color: var(--color-hf-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Pixel-art / geometric decorations ── */
+.hf-pixel-grid {
+  background-image:
+    linear-gradient(to right, rgba(183, 28, 28, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(183, 28, 28, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Skip to content */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--color-hf-red);
+  color: white;
+  padding: 8px 16px;
+  font-weight: 700;
+  z-index: 9999;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-hf-cream-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hf-forest);
+  border-radius: 4px;
+}
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--color-hf-red);
+  outline-offset: 2px;
+}
+
+/* ── Animations ── */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
