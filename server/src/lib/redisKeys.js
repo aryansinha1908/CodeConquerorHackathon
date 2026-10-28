@@ -6,7 +6,8 @@ const normaliseEmail = (email) => String(email).trim().toLowerCase();
 export const keys = {
   otp: (email) => `otp:${normaliseEmail(email)}`,
   otpTries: (email) => `otp:tries:${normaliseEmail(email)}`,
-  refreshToken: (userId, jti) => `auth:refresh:${userId}:${jti}`,
+  // One key per session (a refresh-token family); the value is the family's current jti.
+  refreshFamily: (userId, familyId) => `auth:refresh:${userId}:${familyId}`,
   // Prefix for the rate-limit store; it appends the user id or email itself.
   rateLimitPrefix: (tier) => `rl:${tier}:`,
   resourceLock: (resourceId) => `lock:resource:${resourceId}`,

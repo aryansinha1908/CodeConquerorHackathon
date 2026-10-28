@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { RefreshCw, ArrowLeft, ShieldCheck } from 'lucide-react';
 
@@ -10,52 +10,47 @@ import { formatCountdown } from '../../lib/utils';
 import { toast } from 'sonner';
 
 const OTP_LENGTH = 6;
-const DEFAULT_COUNTDOWN = 60; // seconds until resend is allowed
+// Register and an unverified login have just sent a code; resend-otp answers retryAfter: 60.
+const DEFAULT_COUNTDOWN = 60;
+
+// Ticks a seconds counter down to 0.
+function useCountdown(initial) {
+  const [seconds, setSeconds] = useState(initial);
+  useEffect(() => {
+    if (seconds <= 0) return undefined;
+    const timer = setTimeout(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [seconds]);
+  return [seconds, setSeconds];
+}
 
 export default function VerifyOtpPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { setSession } = useAuthStore();
+  const setSession = useAuthStore((s) => s.setSession);
 
-  // Email comes either from router state (after register) or query param
-  const email =
+  // Email comes either from router state (after register or login) or query param
+  const email = (
     location.state?.email ??
     new URLSearchParams(location.search).get('email') ??
-    '';
+    ''
+  )
+    .trim()
+    .toLowerCase();
 
   // OTP boxes
   const [digits, setDigits] = useState(Array(OTP_LENGTH).fill(''));
   const refs = useRef([]);
 
-  // Countdown
-  const [countdown, setCountdown] = useState(DEFAULT_COUNTDOWN);
-  const intervalRef = useRef(null);
+  // Countdowns: until resend is allowed, and until verify is allowed again after a 429
+  const [countdown, setCountdown] = useCountdown(DEFAULT_COUNTDOWN);
+  const [verifyLock, setVerifyLock] = useCountdown(0);
 
   // UI state
   const [verifying, setVerifying] = useState(false);
+  const verifyingRef = useRef(false); // guards auto-submit firing twice before a re-render
   const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
-  const [attempts, setAttempts] = useState(0);
-
-  // ── Countdown ticker ────────────────────────────────────────────────────────
-  const startCountdown = useCallback((seconds = DEFAULT_COUNTDOWN) => {
-    clearInterval(intervalRef.current);
-    setCountdown(seconds);
-    intervalRef.current = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(intervalRef.current);
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-  }, []);
-
-  useEffect(() => {
-    startCountdown();
-    return () => clearInterval(intervalRef.current);
-  }, [startCountdown]);
 
   // Focus first box on mount
   useEffect(() => {
@@ -109,37 +104,49 @@ export default function VerifyOtpPage() {
     if (next.every(Boolean)) submitOtp(next.join(''));
   };
 
+  const clearDigits = () => {
+    setDigits(Array(OTP_LENGTH).fill(''));
+    refs.current[0]?.focus();
+  };
+
   // ── Verify ──────────────────────────────────────────────────────────────────
   const submitOtp = async (code) => {
     if (!email) {
       setError('Email missing — please go back and register again.');
       return;
     }
+    if (verifyingRef.current) return;
+    if (verifyLock > 0) {
+      setError(`Too many attempts. Please wait ${formatCountdown(verifyLock)} before retrying.`);
+      return;
+    }
+    verifyingRef.current = true;
     setVerifying(true);
     setError('');
     try {
+      // 200 { accessToken, user }: the email is verified and the session starts.
       const res = await verifyOtp({ email, otp: code });
-      const { accessToken } = res.data;
-      setSession(accessToken);
+      const { accessToken, user } = res.data;
+      setSession(accessToken, user);
       toast.success('Email verified! Welcome to CampusCommons.');
-      navigate('/verification');
+      navigate('/verification', { replace: true });
     } catch (err) {
-      setAttempts((a) => a + 1);
       // Reset digits so user can re-enter cleanly
-      setDigits(Array(OTP_LENGTH).fill(''));
-      refs.current[0]?.focus();
+      clearDigits();
 
       if (err.code === 'INVALID_OTP') {
-        setError('Invalid or expired code. Try again or resend.');
-      } else if (err.code === 'RATE_LIMITED') {
+        // The server says how many tries are left, or to request a new code once it's used up.
+        setError(err.message || 'Invalid or expired code. Try again or resend.');
+      } else if (err.code === 'RATE_LIMITED' || err.status === 429) {
         const retryAfter = err.retryAfter ?? 60;
-        startCountdown(retryAfter);
+        setVerifyLock(retryAfter);
         setError(`Too many attempts. Please wait ${formatCountdown(retryAfter)} before retrying.`);
       } else {
         setError(err.message ?? 'Verification failed. Please try again.');
         if (err.requestId) toast.error(`Error ref: ${err.requestId}`);
       }
     } finally {
+      verifyingRef.current = false;
       setVerifying(false);
     }
   };
@@ -160,20 +167,20 @@ export default function VerifyOtpPage() {
     setResending(true);
     setError('');
     try {
+      // 200 { sent, retryAfter } whether or not the account exists (no enumeration).
       const res = await resendOtp({ email });
-      // Respect Retry-After from the response if present
-      const wait = res.data?.retryAfter ?? DEFAULT_COUNTDOWN;
-      startCountdown(wait);
+      setCountdown(res.data?.retryAfter ?? DEFAULT_COUNTDOWN);
       toast.success('New OTP sent! Check your inbox.');
-      setDigits(Array(OTP_LENGTH).fill(''));
-      refs.current[0]?.focus();
+      clearDigits();
     } catch (err) {
-      if (err.code === 'RATE_LIMITED') {
+      if (err.code === 'RATE_LIMITED' || err.status === 429) {
         const retryAfter = err.retryAfter ?? 60;
-        startCountdown(retryAfter);
+        setCountdown(retryAfter);
         setError(`Rate limited. Try again in ${formatCountdown(retryAfter)}.`);
       } else {
-        toast.error(err.message ?? 'Could not resend OTP.');
+        toast.error(err.message ?? 'Could not resend OTP.', {
+          description: err.requestId ? `ref: ${err.requestId}` : undefined,
+        });
       }
     } finally {
       setResending(false);
@@ -272,10 +279,14 @@ export default function VerifyOtpPage() {
           variant="primary"
           size="lg"
           loading={verifying}
-          disabled={filled < OTP_LENGTH || verifying}
+          disabled={filled < OTP_LENGTH || verifying || verifyLock > 0}
           className="w-full"
         >
-          {verifying ? 'Verifying…' : 'Verify →'}
+          {verifying
+            ? 'Verifying…'
+            : verifyLock > 0
+              ? `Try again in ${formatCountdown(verifyLock)}`
+              : 'Verify →'}
         </Button>
 
         {/* Resend */}

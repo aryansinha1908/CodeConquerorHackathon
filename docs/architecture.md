@@ -303,6 +303,9 @@ Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 | `VALIDATION_ERROR`    | 400         |
 | `UNAUTHENTICATED`     | 401         |
 | `EMAIL_NOT_VERIFIED`  | 403         |
+| `INVALID_CREDENTIALS` | 401         |
+| `INVALID_OTP`         | 400         |
+| `EMAIL_TAKEN`         | 409         |
 | `FORBIDDEN`           | 403         |
 | `NOT_FOUND`           | 404         |
 | `SLOT_TAKEN`          | 409         |
@@ -332,11 +335,14 @@ Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 | POST   | `/auth/resend-otp` | public                               | `email`                                                                        | `otpSend` (email)              | —     |
 | POST   | `/auth/login`      | public                               | `email, password`                                                              | `login` (email, failures only) | —     |
 | POST   | `/auth/refresh`    | refresh cookie                       | —                                                                              | `general` (userId from cookie) | —     |
-| POST   | `/auth/logout`     | auth                                 | —                                                                              | `general`                      | —     |
+| POST   | `/auth/logout`     | refresh cookie                       | — (works with an expired access token)                                         | `general`                      | —     |
 | GET    | `/auth/me`         | auth                                 | —                                                                              | `general`                      | —     |
-| POST   | `/auth/demo-login` | public, **only if `DEMO_MODE=true`** | `role: member \| member2 \| faculty \| manager \| admin`                       | `demo` (role)                  | —     |
+| GET    | `/auth/demo-config`| public                               | — → `{ demoMode, roles }`; the login page shows the demo buttons from it        | none                           | —     |
+| POST   | `/auth/demo-login` | public, **only if `DEMO_MODE=true`** | `role: student \| student2 \| faculty \| manager \| admin`                      | `demo` (role)                  | —     |
 
 If a user whose email is not yet verified tries to log in, they get `403 EMAIL_NOT_VERIFIED`, a fresh OTP is sent, and the client redirects them to `/verify-otp`.
+
+A wrong email or password is `401 INVALID_CREDENTIALS` with the same message for both. It is deliberately not `UNAUTHENTICATED`: the client tries a token refresh on `UNAUTHENTICATED` only, which would be wrong on the login page. `register` and `resend-otp` never reveal whether an account exists, except that registering an already verified email is `409 EMAIL_TAKEN`.
 
 **Verification**
 
@@ -470,11 +476,13 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 ### 7.1 Tokens
 
 - **Access token:** a JWT (HS256) valid for **15 min**, holding `sub, roles, memberType, managedOrgUnits, verified`. It is kept **in memory** on the client (Zustand), never in localStorage.
-- **Refresh token:** a JWT valid for **7 days** with a `jti`.
+- **Refresh token:** a JWT valid for **7 days** holding `{ sub, fam, jti }`.
   - It is set as an `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth` cookie.
-  - Its `jti` is allow-listed in Redis (`auth:refresh:{userId}:{jti}`, TTL 7 days).
-  - It **rotates** on every refresh: the old `jti` is deleted and a new one issued.
-  - If an already-used `jti` shows up again, every refresh token for that user is revoked (reuse detection).
+  - Each sign-in starts a **token family** (`fam`, one per session). Redis keeps one key per family, `auth:refresh:{userId}:{familyId}`, holding the family's current `jti` (TTL 7 days).
+  - It **rotates** on every refresh, in one atomic Lua script: the current `jti` is replaced by a new one.
+  - **Reuse detection:** a `jti` that isn't the family's current one ends **that family only** (one `DEL`), and the request gets 401. The `jti` just replaced stays usable for 30 seconds, so two tabs or a retried request refreshing at the same moment both stay signed in. Ending only the one family matters because judges share the demo accounts: one replayed token must not sign out every judge on that role.
+  - Turning `DEMO_MODE` off ends demo sessions at their next refresh.
+- **Sign-up proof:** `register` (and a login with the right password on an unverified account) also sets an `httpOnly; SameSite=Strict` cookie `signupProof`, an HMAC keyed by the account's current password hash. `verify-otp` requires it, so someone who re-registers an unverified email from another browser can't end up owning the account once the real owner enters the code.
 - **Passwords:** bcrypt with cost 12. Policy: 8–72 characters, at least one letter and one digit (72 is bcrypt's input limit).
 - **Suspension:** a suspended user can still log in, but every mutating route returns 403 `FORBIDDEN` with the suspension reason and end date.
 
@@ -595,7 +603,7 @@ POST /bookings
 | ------------------------------------ | -------------------------------------- | ------ | ------------------------------------------ |
 | `otp:{email}`                        | string (sha256 hash)                   | 10 min | Email OTP                                  |
 | `otp:tries:{email}`                  | counter                                | 10 min | Max 5 attempts, then the OTP is deleted    |
-| `auth:refresh:{userId}:{jti}`        | string                                 | 7 days | Refresh-token allowlist and rotation       |
+| `auth:refresh:{userId}:{familyId}`   | string (current jti)                   | 7 days | One per session: rotation, reuse detection |
 | `rl:{tier}:{key}`                    | counter (`lib/redisRateLimitStore.js`) | window | Rate limiting (§11)                        |
 | `lock:resource:{id}`                 | string (uuid)                          | 5 s    | Booking create and approve lock (§9)       |
 | `lock:cron:sweep`                    | string                                 | 4 min  | Ensures only one instance runs the sweeper |
@@ -832,7 +840,7 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Transport       | HTTPS everywhere (Vercel and Render); HSTS through `helmet`                                                                                                                                       |
 | Headers         | `helmet()` defaults, plus `contentSecurityPolicy` tuned for Cloudinary image hosts on the client                                                                                                  |
-| CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_ORIGIN` with `credentials: true`                                                                                 |
+| CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_URL` with `credentials: true`                                                                                 |
 | Cookies         | Refresh cookie is `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`                                                                                                                          |
 | Secrets         | Live only in env; `.env.example` lists the variables; a Zod-validated config means the server refuses to boot with missing or invalid env                                                         |
 | Injection       | Zod plus `strictQuery: 'throw'`; no `$where` or raw string queries; HTML stripped from free text; React escapes output                                                                            |
@@ -881,9 +889,9 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 **Environment variables (server):**
 
 ```
-NODE_ENV, PORT, LOG_LEVEL, CLIENT_ORIGIN
+NODE_ENV, PORT, LOG_LEVEL, CLIENT_URL
 MONGODB_URI, REDIS_URL
-JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, OTP_PEPPER
+ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, OTP_PEPPER, SEED_PASSWORD
 ALLOWED_EMAIL_DOMAINS=nitjsr.ac.in
 DEMO_MODE=true
 CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET

@@ -103,7 +103,10 @@ test('a body that isn\'t JSON is a 400 in the envelope, not an HTML page', async
   });
 });
 
-test('authentication failures preserve the existing error field and include request ID', async (t) => {
+// Login is by email now (architecture.md §6 Auth): the old mock's { username } body is a field error in
+// the envelope, answered before the rate limiter and the database. Wrong credentials (401
+// INVALID_CREDENTIALS) need MongoDB and are tested in test/routes/auth.test.js.
+test('a login without an email is 400 VALIDATION_ERROR in the envelope, with the request ID', async (t) => {
   if (listenError) return t.skip(`HTTP listener unavailable: ${listenError.code || listenError.message}`);
   const response = await fetch(`${origin}/api/v1/auth/login`, {
     method: 'POST',
@@ -115,9 +118,41 @@ test('authentication failures preserve the existing error field and include requ
   });
   const body = await response.json();
 
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 400);
   assert.equal(response.headers.get('x-request-id'), 'login_test_1');
-  assert.deepEqual(body, { error: 'Invalid credentials', requestId: 'login_test_1' });
+  assert.deepEqual(body, {
+    success: false,
+    error: {
+      code: 'VALIDATION_ERROR',
+      message: '1 field is invalid.',
+      details: [{ path: 'email', message: 'Required.' }],
+    },
+    requestId: 'login_test_1',
+  });
+});
+
+test('GET /api/v1/auth/me without a token is 401 UNAUTHENTICATED, the code the client refreshes on', async (t) => {
+  if (listenError) return t.skip(`HTTP listener unavailable: ${listenError.code || listenError.message}`);
+  const response = await fetch(`${origin}/api/v1/auth/me`);
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.error.code, 'UNAUTHENTICATED');
+});
+
+test('demo-config needs no database and reports DEMO_MODE', async (t) => {
+  if (listenError) return t.skip(`HTTP listener unavailable: ${listenError.code || listenError.message}`);
+  const saved = process.env.DEMO_MODE;
+  t.after(() => {
+    if (saved === undefined) delete process.env.DEMO_MODE;
+    else process.env.DEMO_MODE = saved;
+  });
+  process.env.DEMO_MODE = 'false';
+  const off = await (await fetch(`${origin}/api/v1/auth/demo-config`)).json();
+  assert.deepEqual(off.data, { demoMode: false, roles: [] });
+  process.env.DEMO_MODE = 'true';
+  const on = await (await fetch(`${origin}/api/v1/auth/demo-config`)).json();
+  assert.equal(on.data.demoMode, true);
+  assert.equal(on.data.roles.length, 5);
 });
 
 test('CORS continues to allow the configured client origin and credentials', async (t) => {

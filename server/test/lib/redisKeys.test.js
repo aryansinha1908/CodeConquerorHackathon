@@ -8,7 +8,7 @@ test("keys follow the catalogue in architecture.md §10.1", () => {
     "otp:2024ugcs999@nitjsr.ac.in",
   );
   assert.equal(keys.otpTries("A@B.in"), "otp:tries:a@b.in");
-  assert.equal(keys.refreshToken("u1", "j1"), "auth:refresh:u1:j1");
+  assert.equal(keys.refreshFamily("u1", "f1"), "auth:refresh:u1:f1");
   assert.equal(keys.rateLimitPrefix("login"), "rl:login:");
   assert.equal(keys.resourceLock("r1"), "lock:resource:r1");
   assert.equal(keys.sweepLock, "lock:cron:sweep");

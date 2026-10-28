@@ -3,9 +3,10 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import helmet from 'helmet';
 import mongoose from 'mongoose';
 import { pingRedis } from './config/redis.js';
-import authRoutes from './routes/authRoutes.js';
+import authRoutes from './routes/auth.js';
 import { requestIdMiddleware } from './middleware/requestLogger.js';
 import { httpLogger } from './middleware/httpLogger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -15,6 +16,7 @@ const app = express();
 // Request ID and HTTP logging come first so parser and route errors carry the ID.
 app.use(requestIdMiddleware);
 app.use(httpLogger);
+app.use(helmet());
 
 app.use(express.json());
 app.use(cookieParser());
@@ -28,6 +30,7 @@ app.use(
 );
 
 app.use('/api/v1/auth', authRoutes);
+// The domain routers (resources, bookings, …) are mounted here in Phase 3, each behind verifyAuth.
 
 // architecture.md §13.3: 503 only when MongoDB is down. Without Redis the API still serves, with no
 // cache and bookings answering 503 (§10.2), so Redis being down is "degraded", not down.

@@ -1,48 +1,67 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
+import { Button } from '../../components/ui/Button';
 import { refreshToken, getMe } from './api';
 
+// One boot at a time (frontend.md §8.1 step 1): the cookie rotates on every refresh, so StrictMode's
+// second effect run, or a second guard mounting, must wait on the same promise, not start another.
+let bootPromise = null;
+
+function ensureSession() {
+  if (!bootPromise) {
+    bootPromise = (async () => {
+      // POST /auth/refresh stores { accessToken, user }.
+      if (!useAuthStore.getState().accessToken) await refreshToken();
+      // GET /auth/me only when the session came without a user.
+      if (!useAuthStore.getState().user) {
+        const res = await getMe();
+        useAuthStore.getState().setUser(res.data);
+      }
+    })().finally(() => {
+      bootPromise = null;
+    });
+  }
+  return bootPromise;
+}
+
 export function RequireAuth({ children }) {
-  const { accessToken, user, setSession, setUser } = useAuthStore();
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const user = useAuthStore((s) => s.user);
   const location = useLocation();
-  const [checking, setChecking] = useState(!accessToken);
+  const [checking, setChecking] = useState(() => !(accessToken && user));
+  // A boot that failed for a reason other than 401 (503 while Redis is down, no network). The
+  // server keeps the refresh cookie for that retry, so this is not a logout.
+  const [bootError, setBootError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
+  // Runs once per mount, and again on Retry: a later setSession (login, refresh) must not start
+  // another round trip.
   useEffect(() => {
+    const { accessToken: token, user: current } = useAuthStore.getState();
+    if (token && current) return undefined;
+
     let mounted = true;
-
-    async function initAuth() {
-      if (accessToken && user) {
-        setChecking(false);
-        return;
-      }
-
-      try {
-        let token = accessToken;
-        if (!token) {
-          const res = await refreshToken();
-          token = res?.data?.accessToken;
-          if (token) setSession(token);
+    ensureSession()
+      .catch((err) => {
+        if (err?.status === 401) {
+          // Not authenticated (or the account is gone): treat as logged out.
+          useAuthStore.getState().clear();
+        } else if (mounted) {
+          setBootError(err ?? {});
         }
-
-        if (token && !user) {
-          const meRes = await getMe();
-          if (meRes?.data) setUser(meRes.data);
-        }
-      } catch (err) {
-        // Not authenticated
-      } finally {
+      })
+      .finally(() => {
         if (mounted) setChecking(false);
-      }
-    }
-
-    initAuth();
+      });
     return () => {
       mounted = false;
     };
-  }, [accessToken, user, setSession, setUser]);
+  }, [attempt]);
 
-  if (checking) {
+  const next = encodeURIComponent(location.pathname + location.search);
+
+  if (checking && !(accessToken && user)) {
     return (
       <div className="min-h-screen bg-[#f5f0e8] flex flex-col items-center justify-center font-mono">
         <div className="bg-white border-2 border-[#1a1a1a] rounded-xl p-8 shadow-[4px_4px_0_#1a1a1a] text-center max-w-sm w-full">
@@ -54,10 +73,45 @@ export function RequireAuth({ children }) {
     );
   }
 
+  if (bootError && !accessToken) {
+    const retry = () => {
+      setBootError(null);
+      setChecking(true);
+      setAttempt((n) => n + 1);
+    };
+    return (
+      <div className="min-h-screen bg-[#f5f0e8] flex flex-col items-center justify-center font-mono px-4">
+        <div
+          role="alert"
+          className="bg-white border-2 border-[#1a1a1a] rounded-xl p-8 shadow-[4px_4px_0_#1a1a1a] text-center max-w-sm w-full"
+        >
+          <p className="text-sm font-bold text-[#1a1a1a]">CAN&apos;T REACH THE SERVER</p>
+          <p className="text-xs text-[#1a1a1a]/60 mt-1">
+            We couldn&apos;t check your session. Try again in a moment.
+          </p>
+          {bootError.requestId && (
+            <p className="text-[10px] text-[#1a1a1a]/40 mt-2">ref: {bootError.requestId}</p>
+          )}
+          <div className="mt-5 flex flex-col gap-3">
+            <Button variant="forest" size="md" onClick={retry} className="w-full">
+              Retry
+            </Button>
+            <Link
+              to={`/login?next=${next}`}
+              replace
+              className="text-xs font-bold text-[#c0392b] underline underline-offset-2 hover:text-[#a93226]"
+            >
+              Log in again
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!accessToken) {
-    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+    return <Navigate to={`/login?next=${next}`} replace />;
   }
 
   return children;
 }
-

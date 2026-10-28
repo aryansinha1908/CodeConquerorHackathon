@@ -6,6 +6,7 @@
 // Mounting order:
 //   auth routes:    validate(schema) → loginLimiter → handler   (needs a validated req.body.email)
 //   API router:     requireAuth → generalLimiter → routes        (needs req.user)
+//   refresh/logout: refreshCookieUser → refreshLimiter             (needs req.refreshUserId)
 //   POST /bookings: bookingCreateLimiter;  upload routes: uploadLimiter
 import { rateLimit } from "express-rate-limit";
 import { log } from "../config/redis.js";
@@ -34,6 +35,17 @@ function byUser(req) {
   if (!id)
     throw new Error(
       "Rate limiter needs req.user: mount it after the auth middleware",
+    );
+  return String(id);
+}
+
+// /auth/refresh and /auth/logout carry no access token: routes/auth.js puts the user id from the signed
+// refresh cookie in req.refreshUserId. They count against that user's general tier (architecture.md §6).
+function byRefreshCookie(req) {
+  const id = req.refreshUserId;
+  if (!id)
+    throw new Error(
+      "Rate limiter needs req.refreshUserId: mount it after refreshCookieUser",
     );
   return String(id);
 }
@@ -127,6 +139,7 @@ export function createLimiter(tierName, overrides = {}) {
     limit: tier.limit,
     keyGenerator: tier.key,
     skipSuccessfulRequests: tier.skipSuccessfulRequests ?? false,
+    skip: tier.skip,
     standardHeaders: "draft-7", // RateLimit headers, plus Retry-After on a 429
     legacyHeaders: false,
     passOnStoreError: true,
@@ -163,5 +176,11 @@ export const otpSendLimiter = [
 export const otpVerifyLimiter = createLimiter("otpVerify");
 export const demoLimiter = createLimiter("demo");
 export const generalLimiter = createLimiter("general");
+// The same counters as generalLimiter. Without a signed cookie there is nothing to count: the route
+// answers 401 (refresh) or 200 (logout) without touching Redis.
+export const refreshLimiter = createLimiter("general", {
+  key: byRefreshCookie,
+  skip: (req) => !req.refreshUserId,
+});
 export const bookingCreateLimiter = createLimiter("bookingCreate");
 export const uploadLimiter = createLimiter("upload");

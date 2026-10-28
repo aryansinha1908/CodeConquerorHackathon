@@ -386,7 +386,7 @@ Covered in [`architecture.md` §14](./architecture.md#14-scheduled-jobs-mvp-node
 
 ## 7. Validation catalogue
 
-Every route has a Zod schema in `validators/`. The `validate` middleware parses `req.body`, `req.params` and `req.query`, replaces them with the parsed values, and turns `ZodError` into `400 VALIDATION_ERROR` with `details[{ path, message }]`.
+**Changed during integration (Oct 2026): the services are the validation layer.** Every service checks its own input with `services/params.js` and answers `400 VALIDATION_ERROR` with `details[{ path, message }]`, so the controllers pass `req.body`, `req.params` and `req.query` straight through and there is no `validators/` folder. Express 5's default query parser can't build objects such as `{ $ne: … }` from a query string. The rules below still describe what each input must satisfy; the auth service applies its rows itself, before the rate limiters, which key on the validated email.
 
 **Shared primitives:**
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { logout as apiLogout } from '../../features/auth/api';
+import { queryClient } from '../queryClient';
 import { toast } from 'sonner';
 import {
   Compass,
@@ -34,16 +35,25 @@ export function AppLayout() {
   const isVerified = user?.verification?.status === 'approved' || isManager || isAdmin;
   const isPending = user?.verification?.status === 'pending';
 
+  // frontend.md §8.1 step 4. POST /auth/logout always answers 200 and clears the cookie. The refresh
+  // cookie is httpOnly, so only the server can end the session: if the call fails (network, 5xx), the
+  // next visit would sign straight back in, so the user stays signed in here and is told so. On
+  // success, leave the guarded routes first (flushSync commits the navigation before clear(), so
+  // RequireAuth never sees the empty store and adds ?next=), then drop the token and every cached query.
   const handleLogout = async () => {
     try {
       await apiLogout();
-    } catch (e) {
-      // ignore
-    } finally {
-      clear();
-      toast.success('Logged out successfully');
-      navigate('/login');
+    } catch (err) {
+      toast.error("Couldn't reach the server, so you're still signed in.", {
+        description: err?.requestId ? `ref: ${err.requestId}` : 'Check your connection and try again.',
+        action: { label: 'Retry', onClick: () => handleLogout() },
+      });
+      return;
     }
+    await navigate('/login', { replace: true, flushSync: true });
+    clear();
+    queryClient.clear();
+    toast.success('Logged out successfully');
   };
 
   const navLinkClass = ({ isActive }) =>

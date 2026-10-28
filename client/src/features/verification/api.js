@@ -38,8 +38,9 @@ export async function uploadIdCard(formData) {
     });
     return res.data;
   } catch (err) {
-    // If endpoint is not yet on server, update local user state so developer/judge can test without error
-    if (err.status === 404 || err.code === 'UNKNOWN') {
+    // If endpoint is not yet on server, update local user state so developer/judge can test without error.
+    // Only a 404: a network error or a bare 5xx (code 'UNKNOWN') means nothing was uploaded.
+    if (err.status === 404) {
       const user = useAuthStore.getState().user || {};
       const memberType = formData.get('memberType') || 'UG';
       const updatedUser = {

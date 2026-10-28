@@ -2,7 +2,9 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `1a59fed` (the notification and audit reads). `main` has everything through PR #9 (`623e78f`). Moving the services onto `params.js` (§2, last row) is in the working tree, **not yet committed**.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **Now integrating the frontend and the backend** in five phases (§11); Phase 1 (real auth and the seed) is committed locally on `Aryan`, not pushed.
+
+**Team change:** the auth teammate has stopped; the frontend teammate is doing `/badges` and one more page (to be confirmed). Everything else is integration work on `Aryan`.
 
 **Tests:**
 - `npm test` (`node --test`, every file): **245 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
@@ -51,10 +53,10 @@ The running record of what's built, what was decided and what's left. Read this 
 
 | ID | Feature | Status |
 |---|---|---|
-| B-01 | Domain-restricted registration + email OTP | ❌ Teammate. Current auth is a mock with in-memory users |
-| B-02 | Email-pattern hints | ❌ Not started (the `User.emailHints` field exists) |
+| B-01 | Domain-restricted registration + email OTP | ✅ Phase 1: `authService` + `authOtp` (peppered sha256 in Redis, 10 min, 5 tries), nodemailer (`config/mailer.js`), sign-up proof cookie |
+| B-02 | Email-pattern hints | ✅ Phase 1: `emailHints()` fills `User.emailHints` on register |
 | B-03 | ID-card upload + admin verification | ❌ Not started (model fields exist) |
-| B-04 | JWT auth + demo login | 🟡 Teammate's mock: login by `username`, demo user id `demo-user-id-001` isn't a database id, refresh tokens kept in memory |
+| B-04 | JWT auth + demo login | ✅ Phase 1: login by email, access token with the §7.1 claims, refresh-token families in Redis with rotation and per-family reuse detection, demo login gated by `DEMO_MODE`. The mock is deleted |
 | B-05 | RBAC + unit scope | 🟡 Scope enforced inside the services (`services/access.js`, state-machine relations); route middleware pending |
 | B-06 | Zod validation + error envelope | 🟡 The error handler sends the `architecture.md` §6 envelope (ZodError, CastError, ValidationError, E11000 and body-parser errors mapped). No `validate()` or Zod schemas yet (teammate) |
 | B-07 | OrgUnits + resource CRUD | ✅ Service done (`orgUnitService`, `resourceService`) |
@@ -72,7 +74,7 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-19 | Audit log + timeline | ✅ Service done, including the audit query (`listAudit`) |
 | B-20 | Rate limiting | ✅ Middleware done, **not mounted** yet |
 | B-21 | pino logging, request ids, `/health` | ✅ Teammate's pino logger, request ids and HTTP log (PR #6); `/health` reports MongoDB and Redis as `architecture.md` §13.3 says |
-| B-22 | Seed script | ❌ Teammate |
+| B-22 | Seed script | 🟡 Phase 1: `npm run seed` (18 units, 7 badges, 13 resources, 6 demo users, manager assignment, cache flush; idempotent). Bookings in every state come in Phase 4 |
 
 ---
 
@@ -196,7 +198,11 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 |---|---|---|
 | `MONGODB_URI` | **Yes**: the server refuses to start without it | Include the database name in the path |
 | `REDIS_URL` | Yes | Upstash `rediss://…` TCP URL |
-| `PORT`, `CLIENT_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | Yes | — |
+| `PORT`, `CLIENT_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `OTP_PEPPER` | Yes | — |
+| `SEED_PASSWORD` | For `npm run seed` | The demo users' password |
+| `DEMO_MODE`, `ALLOWED_EMAIL_DOMAINS` | Optional | `DEMO_MODE=true` enables the demo buttons; domains default to `nitjsr.ac.in` |
+| `SMTP_*`, `MAIL_FROM` | For real email | Without `SMTP_HOST`, emails (OTPs included) are logged to the console outside production |
+| `CLOUDINARY_*` | From Phase 2 | ID cards, badge evidence and photos |
 | `CRON_ENABLED` | Optional | — |
 | `AI_*` | Optional | Only once AI features exist |
 
@@ -204,6 +210,7 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 ```
 cd server
 npm install
+npm run seed                    # demo data; idempotent (needs SEED_PASSWORD)
 npm run dev                     # or npm start
 npm test                        # unit tests; integration suites skip themselves
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017 node --test test/integration   # use a local/test DB, never production
@@ -251,7 +258,14 @@ The high-severity fixes:
 
 ---
 
-## 11. Next steps (resume here)
+## 11. Next steps (resume here): the integration plan
 
-1. **Routes and controllers** for resources, org units, bookings, badges, incidents, notifications and the audit log, once the validators and real-user auth land.
-2. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
+The goal is the judge script (`frontend.md` §11) working on localhost with real data and no mocks, then deployed. Each phase runs as one multi-agent workflow: builders on separate files, then backend, security, contract (and, for client phases, frontend and design) reviewers on the combined diff, then fixers who reproduce each finding before fixing it, then the test gate.
+
+1. ✅ **Phase 1: real auth and the seed script.** 21 review findings: 15 fixed, 4 duplicates, 2 deferred (below). 515 server tests, plus 6 new client tests.
+2. **Phase 2: uploads (Cloudinary) and ID verification**, server and client, plus `/admin/verifications`.
+3. **Phase 3: domain routers** over the existing services, badges first (for the frontend teammate).
+4. **Phase 4: the client on real data**: mocks removed, the existing pages fixed to the backend schema, and the missing pages in judge-script order, plus seeded bookings and an API golden-path script.
+5. **Phase 5: hardening and deploy** (Render, Vercel, Atlas, Upstash).
+
+**Deferred from Phase 1 (decisions needed):** the documented "never key a rate limit on IP" rule leaves two gaps. (a) Rotating email addresses gets unlimited register/OTP emails and bcrypt work. (b) About 60 scripted demo-login requests per role lock the judges out for 15 minutes. The proposed fix is a coarse per-IP ceiling stacked on the existing per-email and per-role limits, plus a global daily OTP-mail cap and `app.set('trust proxy', 1)` for Render.
