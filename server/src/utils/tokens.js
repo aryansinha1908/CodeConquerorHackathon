@@ -17,6 +17,6 @@ export const generateTokens = (user) => {
 export const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax', 
-  maxAge: 7 * 24 * 60 * 60 * 1000, 
+  sameSite: 'lax', // Use 'none' if client and server are on different root domains with HTTPS
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
 };

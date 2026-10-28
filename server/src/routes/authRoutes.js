@@ -65,7 +65,7 @@ router.post('/refresh', (req, res) => {
       const decoded = jwt.verify(incomingToken, process.env.REFRESH_TOKEN_SECRET);
       // In production: invalidate ALL tokens belonging to decoded.id
       console.warn(`Potential token reuse attack by user ${decoded.id}`);
-    } catch (_) {}
+    } catch (_) { }
 
     res.clearCookie('refreshToken', REFRESH_COOKIE_OPTIONS);
     return res.status(403).json({ error: 'Token revoked or already used' });
