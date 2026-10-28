@@ -651,7 +651,7 @@ Defence in depth:
 
 - **Zod at the edge (authoritative).** `validate({ body, params, query })` middleware runs on **every** route. Unknown keys are stripped (`.strip()`), and types are coerced only where safe (query strings → numbers and dates). The parsed result replaces `req.body`, `req.params` and `req.query`, so controllers only ever see clean data.
 - **Mongoose schema validators (second layer).** These are `required`, `enum`, `min/max`, `maxlength` and custom validators, which catch bugs in internal writes such as cron jobs and seeds.
-- **Query safety.** `mongoose.set('sanitizeFilter', true)` and `strictQuery`. Operator injection (`{ "$gt": "" }`) is impossible both because Zod forces primitives and because filters are sanitised.
+- **Query safety.** `mongoose.set('strictQuery', 'throw')` (in `config/db.js`). A filter field that isn't in the schema throws an error. With `strictQuery: true` it would be dropped silently, so a typo in `deleteMany` would match every document. Operator injection (`{ "$gt": "" }`) is blocked by Zod, which turns ids, enums and text into plain values before any query runs. `sanitizeFilter` is **not** used: it rewrites every `$` operator, including the services' own `$in` and `$lt`, so those queries fail with a `CastError`.
 - **React Hook Form + Zod on the client** for instant feedback. **The server stays authoritative.**
 
 **Validation catalogue** (full per-route schemas are in [`backend.md` §7](./backend.md#7-validation-catalogue)):
@@ -824,7 +824,7 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 | CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_ORIGIN` with `credentials: true`                                                                                 |
 | Cookies         | Refresh cookie is `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`                                                                                                                          |
 | Secrets         | Live only in env; `.env.example` lists the variables; a Zod-validated config means the server refuses to boot with missing or invalid env                                                         |
-| Injection       | Zod plus `sanitizeFilter`; no `$where` or raw string queries; HTML stripped from free text; React escapes output                                                                                  |
+| Injection       | Zod plus `strictQuery: 'throw'`; no `$where` or raw string queries; HTML stripped from free text; React escapes output                                                                            |
 | Uploads         | Size and count caps, MIME and magic-byte check, Cloudinary stores the files (never our disk), random public IDs                                                                                   |
 | Least data      | Managers see a borrower's name, member type, department and history with _their own_ unit, never email-derived roll numbers or ID images; availability endpoints show "busy" blocks with no names |
 | ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision                                                                                       |
