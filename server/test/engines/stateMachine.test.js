@@ -246,14 +246,17 @@ describe("freesSlot (triggers waitlist promotion)", () => {
     );
   });
 
-  test("not set when the booking never held the slot, or is only moved to the waitlist", () => {
-    assert.equal(attempt("waitlisted", "cancel", borrower).freesSlot, false);
+  test("set when a manager moves a pending request to the waitlist", () => {
     assert.equal(
       attempt("pending", "waitlist", manager, {
         reason: "Earlier request has priority",
       }).freesSlot,
-      false,
+      true,
     );
+  });
+
+  test("not set when the booking never held the slot, or keeps it", () => {
+    assert.equal(attempt("waitlisted", "cancel", borrower).freesSlot, false);
     assert.equal(attempt("pending", "approve", manager).freesSlot, false);
   });
 });

@@ -61,8 +61,8 @@ const startPassed = (b, now) => {
 // review:    a decision on someone's request; nobody but an admin may decide on their own booking
 // report:    condition-report phase the payload must carry
 // incident:  payload must carry incident details
-// freesSlot: when leaving a slot-holding status, promote the waitlist (backend.md §6.3). `waitlist`
-//            doesn't, or promotion could pull the same request straight back to pending.
+// freesSlot: when leaving a slot-holding status, promote the waitlist (backend.md §6.3). After
+//            `waitlist`, promotion skips the request just waitlisted, or it would come straight back.
 export const TRANSITIONS = {
   approve: {
     from: ["pending"],
@@ -86,6 +86,7 @@ export const TRANSITIONS = {
     by: ["unitManager", "admin"],
     reason: true,
     review: true,
+    freesSlot: true,
     audit: "booking.waitlisted",
   },
   cancel: {

@@ -411,6 +411,49 @@ describe("bookingService", { skip }, () => {
       );
     });
 
+    test("waitlisting a pending request gives its slot to the next in line, not back to it", async () => {
+      const { booking: first } = await book(f.student);
+      const second = (await book(f.student2, TUE, { joinWaitlist: true }))
+        .booking;
+
+      await transition(
+        first._id,
+        "waitlist",
+        f.manager._id,
+        { reason: "Kabir's project deadline is earlier" },
+        opts,
+      );
+
+      const statusOf = async (b) =>
+        (await Booking.findById(b._id).lean()).status;
+      assert.equal(await statusOf(first), "waitlisted");
+      assert.equal(
+        await statusOf(second),
+        "pending",
+        "the next request moves up",
+      );
+      assert.equal(
+        (await getBooking(first._id, f.student._id, opts)).waitlistPosition,
+        1,
+      );
+      assert.equal(
+        (await notificationsFor(f.student2)).at(-1).type,
+        "booking.promoted",
+      );
+      const approved = await transition(
+        second._id,
+        "approve",
+        f.manager._id,
+        {},
+        opts,
+      );
+      assert.equal(
+        approved.status,
+        "approved",
+        "and the manager can now approve it",
+      );
+    });
+
     test("only decisions go through transition()", async () => {
       const { booking } = await book(f.student);
       assert.equal(
@@ -514,6 +557,29 @@ describe("bookingService", { skip }, () => {
       );
       assert.equal(done.status, "completed");
       assert.equal(incident, null);
+    });
+
+    test("a return is only confirmed with an explicit outcome", async () => {
+      const booking = await approvedBooking();
+      await checkIn(booking._id, f.student._id, checklistOk(), handoverTime);
+      await checkOut(booking._id, f.student._id, checklistOk(), {
+        now: TUE.end,
+      });
+
+      for (const input of [{}, { outcome: "okay" }, { outcome: null }]) {
+        const err = await failure(
+          confirmReturn(booking._id, f.manager._id, input, { now: TUE.end }),
+        );
+        assert.equal(err.code, "VALIDATION_ERROR", JSON.stringify(input));
+        assert.deepEqual(err.details, [
+          { path: "outcome", message: 'Expected "ok" or "issue"' },
+        ]);
+      }
+      assert.equal(
+        (await Booking.findById(booking._id).lean()).status,
+        "checked_out",
+        "nothing changed",
+      );
     });
 
     test("reporting an issue flags the booking and opens an incident for a human", async () => {

@@ -22,17 +22,19 @@ export const snapshot = (evaluation) =>
   }));
 
 // Promotes, oldest first, every waitlisted request overlapping the freed slot that now fits.
+// skip: ids never promoted this time (the request a manager just moved to the waitlist).
 // Call with the resource lock held. → the promoted bookings
 export async function promoteWaitlist(
   resource,
   freed,
-  { now = new Date(), requestId } = {},
+  { now = new Date(), requestId, skip = [] } = {},
 ) {
   const candidates = await Booking.find({
     resource: resource._id,
     status: "waitlisted",
     start: { $lt: freed.end, $gt: now },
     end: { $gt: freed.start },
+    _id: { $nin: skip },
   })
     .sort({ createdAt: 1 })
     .lean();

@@ -14,6 +14,7 @@ import {
   relationsOf,
 } from "../engines/stateMachine.js";
 import { withLock } from "../lib/lock.js";
+import { RETURN_OUTCOMES } from "../models/enums.js";
 import { keys } from "../lib/redisKeys.js";
 import {
   ServiceError,
@@ -288,8 +289,11 @@ export async function transition(
     action === "approve"
       ? await withLock(keys.resourceLock(resource._id), apply)
       : await apply();
-  if (check.freesSlot)
-    await promoteFreedSlot(resource, booking, { now, requestId });
+  if (check.freesSlot) {
+    // A manager who waitlists a request wants the slot to go to someone else.
+    const skip = action === "waitlist" ? [booking._id] : [];
+    await promoteFreedSlot(resource, booking, { now, requestId, skip });
+  }
   return updated;
 }
 
@@ -445,6 +449,12 @@ export async function confirmReturn(
   input,
   { now = new Date(), requestId } = {},
 ) {
+  // Never default to "ok": a missing outcome would silently close a booking without an inspection.
+  if (!RETURN_OUTCOMES.includes(input.outcome)) {
+    throw invalid('The outcome must be "ok" or "issue".', [
+      { path: "outcome", message: 'Expected "ok" or "issue"' },
+    ]);
+  }
   const action = input.outcome === "issue" ? "confirmIssue" : "confirmOk";
   const [booking, actor] = await Promise.all([
     requireBooking(bookingId),
