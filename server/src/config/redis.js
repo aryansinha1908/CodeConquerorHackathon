@@ -8,20 +8,12 @@
 // has run, and tests and scripts that never touch Redis open no socket.
 import { once } from "node:events";
 import Redis from "ioredis";
+import { log, setLogger } from "../lib/log.js";
+
+export { log, setLogger as setRedisLogger };
 
 const DEFAULT_URL = "redis://127.0.0.1:6379";
 const ERROR_LOG_INTERVAL_MS = 60_000;
-
-// console until lib/logger.js (pino) exists; server.js passes it to connectRedis().
-let logger = console;
-export const log = {
-  info: (...args) => logger.info(...args),
-  warn: (...args) => logger.warn(...args),
-  error: (...args) => logger.error(...args),
-};
-export const setRedisLogger = (next) => {
-  logger = next;
-};
 
 let client = null;
 

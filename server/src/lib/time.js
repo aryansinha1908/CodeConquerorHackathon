@@ -66,6 +66,15 @@ export const formatIstDate = (date) => dateFormat.format(new Date(date)); // "5 
 export const formatIstDateTime = (date) =>
   dateTimeFormat.format(new Date(date)); // "5 Nov, 14:30"
 
+// "3 Nov, 10:00–12:00", or "3 Nov, 16:00 – 5 Nov, 10:00" when it spans days.
+export function formatIstRange(start, end) {
+  const from = formatIstDateTime(start);
+  if (istParts(start).dateKey === istParts(end).dateKey) {
+    return `${from}–${formatHHmm(istParts(end).minutes)}`;
+  }
+  return `${from} – ${formatIstDateTime(end)}`;
+}
+
 export const plural = (n, unit) => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
 // 30 → "30 minutes", 240 → "4 hours", 90 → "1 h 30 min", 4320 → "3 days"
