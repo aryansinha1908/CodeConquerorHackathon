@@ -2,11 +2,11 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `9294dac` (the badge service). `main` has everything up to `549917d` through PR #4. The incident service (§2, last row) is in the working tree, **not yet committed**.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, at `af94132` (PR #7 merged into `main`, after the teammate's pino work in PR #6). The post-merge review fixes (§2, last row) are in the working tree, **not yet committed**.
 
 **Tests:**
-- `npm test`: **219 pass**.
-- Integration suite against a real MongoDB: **168 pass** (30 for badges, 21 for incidents), run twice in a row with no flaky failures.
+- `npm test` (`node --test`, every file): **236 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
+- With a real MongoDB: **404 pass** (168 of them integration), run twice in a row with no flaky failures.
 
 ---
 
@@ -37,7 +37,9 @@ The running record of what's built, what was decided and what's left. Read this 
 | `b7b49e2` | **Wiring:** `config/db.js` (`strictQuery: "throw"`); `server.js` connects MongoDB → Redis → sweeper, shuts down cleanly on SIGTERM, and mounts routes under `/api/v1`; backend dependencies added |
 | `549917d` | **Resource and org-unit services**, built by a 7-agent workflow (see §8): listing, search, detail, availability, the eligibility checklist, manager create/edit/status, the org-unit catalogue, manager assignment |
 | `9294dac` | **Badge service** (B-09): catalogue, create, `/badges/mine`, request with evidence, the manager queue, approve/reject, direct grant, with tests for the judges' golden path and for races. A mutation check broke 23 guards on purpose, and a test failed for every one |
-| _uncommitted_ | **Incident service** (B-16): report, list, detail, comments, resolve; resolving the last open incident of a flagged booking closes it. Mutation check: 30 guards broken on purpose, 29 caught. The survivor only drops a projection that keeps comment text out of list reads, which nothing can observe |
+| `46da3d6` | **Incident service** (B-16): report, list, detail, comments, resolve; resolving the last open incident of a flagged booking closes it. Mutation check: 30 guards broken on purpose, 29 caught. The survivor only drops a projection that keeps comment text out of list reads, which nothing can observe |
+| `a81ae2f` | (Teammate, PR #6) **pino logging:** `lib/logger.js` with redaction, `X-Request-Id`, the HTTP log, `app.js` split from `server.js`, graceful shutdown, a first error handler |
+| _uncommitted_ | **Post-merge review fixes:** the server crashed at boot (`setRedisLogger` ReferenceError in `connectRedis`, reached once `server.js` passed a logger); `npm test` ran 7 of 226 tests; `.gitignore` only ignored `server/.env`; the error handler dropped `code`, `details` and `headers` and turned every 400 into "Invalid request"; `verifyAuth` had no `UNAUTHENTICATED` code; `/health` said ok with MongoDB down; the request log's route was always "[unmatched route]" |
 
 ---
 
@@ -52,7 +54,7 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-03 | ID-card upload + admin verification | ❌ Not started (model fields exist) |
 | B-04 | JWT auth + demo login | 🟡 Teammate's mock: login by `username`, demo user id `demo-user-id-001` isn't a database id, refresh tokens kept in memory |
 | B-05 | RBAC + unit scope | 🟡 Scope enforced inside the services (`services/access.js`, state-machine relations); route middleware pending |
-| B-06 | Zod validation + error envelope | ❌ Teammate. No `validate()` and no error handler yet |
+| B-06 | Zod validation + error envelope | 🟡 The error handler sends the `architecture.md` §6 envelope (ZodError, CastError, ValidationError, E11000 and body-parser errors mapped). No `validate()` or Zod schemas yet (teammate) |
 | B-07 | OrgUnits + resource CRUD | ✅ Service done (`orgUnitService`, `resourceService`) |
 | B-08 | Search, filters + Redis cache | ✅ Service done |
 | B-09 | Badges | ✅ Service done (`badgeService`) |
@@ -67,7 +69,7 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-18 | Notifications | 🟡 In-app done; email waits for a mailer; no list/read endpoints yet |
 | B-19 | Audit log + timeline | ✅ Service done; audit query endpoint pending |
 | B-20 | Rate limiting | ✅ Middleware done, **not mounted** yet |
-| B-21 | pino logging, request ids, `/health` | ❌ Teammate (`pingRedis()` is ready for `/health`) |
+| B-21 | pino logging, request ids, `/health` | ✅ Teammate's pino logger, request ids and HTTP log (PR #6); `/health` reports MongoDB and Redis as `architecture.md` §13.3 says |
 | B-22 | Seed script | ❌ Teammate |
 
 ---
@@ -92,7 +94,9 @@ The running record of what's built, what was decided and what's left. Read this 
 | `services/access.js` | `isAdmin`, `managesUnit`, `requireAdmin`, `requireUnitManager`, `auditRole` (moved here from `resourceService`) |
 | `services/auditService.js`, `notifyService.js`, `cacheService.js`, `aiQuotaService.js` | Cross-cutting services |
 | `jobs/sweeper.js` | `runSweep`, `startSweeper`, `stopSweeper` |
-| `server.js`, `routes/authRoutes.js`, `middleware/auth.js`, `utils/tokens.js` | **Teammate's files.** Only the startup wiring and the `/api/v1` mount in `server.js` were changed |
+| `server.js`, `app.js` | Startup and shutdown; the Express app (request id, HTTP log, JSON, cookies, CORS, routes, `/health`, 404, error handler) without a listener, so tests can mount it |
+| `lib/logger.js`, `middleware/requestLogger.js`, `middleware/httpLogger.js`, `middleware/errorHandler.js` | pino with redaction; `X-Request-Id`; one log record per request with the matched route; the error envelope |
+| `routes/authRoutes.js`, `middleware/auth.js`, `utils/tokens.js` | **Teammate's mock auth.** `verifyAuth` now answers 401 `UNAUTHENTICATED` through the error handler |
 
 The service conventions are the contract for future controllers:
 - Services take `req.user.id` and validated input.
@@ -155,15 +159,15 @@ All of these are now reflected in `architecture.md` and `backend.md`.
    - Put the user's `_id` in the token (exposed as `req.user.id`) together with `roles`.
    - Add `register`, `verify-otp`, `resend-otp` and `demo-config`, and demo login by role.
    - Keep the refresh `jti` in Redis (`keys.refreshToken`).
-2. **`verifyAuth`** must answer 401 with `code: "UNAUTHENTICATED"`. Without that, the client never refreshes an expired token.
-3. **One response envelope:** `client/src/lib/http.js` reads `data.code` at the top level, `architecture.md` §6 nests it under `data.error`, and the auth routes return `{ error: "…" }`. Agree on one shape and make all three match.
-4. **Error handler:** none exists, and Express 5's default sends HTML. It must send `err.status`, `code`, `details` and `headers`. It should map ZodError to 400 and CastError to 400.
+2. ~~`verifyAuth` must answer 401 `UNAUTHENTICATED`~~ ✅ done in the post-merge review.
+3. **One response envelope:** ✅ the error handler and `client/src/lib/http.js` now use the `architecture.md` §6 shape. Still open: the mock auth routes answer `{ error: "…", requestId }` inline. Pass errors to `next()` as `ServiceError`s in the rewrite; the client reads both shapes until then. A failed login needs a code that **isn't** `UNAUTHENTICATED`, or the client would try a token refresh on the login page.
+4. ~~Error handler~~ ✅ done: `middleware/errorHandler.js`.
 5. **Validators:**
    - On Express 5, `req.query` can't be reassigned, so store parsed values another way (e.g. `req.validated`).
    - Resource schemas must reject `null` array items and dotted keys.
    - Parse `includeInactive` strictly: `z.coerce.boolean()` turns `"false"` into `true`.
 6. **Routes and controllers** for `/api/v1/resources`, `/org-units` and `/bookings`. Mount `generalLimiter` after auth, and the auth-tier limiters after validation.
-7. **Request-id middleware,** for the audit log and the envelope.
+7. ~~Request-id middleware~~ ✅ (PR #6). Controllers pass `{ requestId: req.id }` to the services, which put it in the audit log.
 8. **Admin user-role route:** writing `managedOrgUnits` directly must go through `setOrgUnitManagers`.
 9. **Seed script:** NIT JSR units, badges, sample resources and the demo users (`backend.md` §9). Writes that bypass the services leave `cache:badges` and `cache:orgunits` stale for up to 10 minutes, so flush them after seeding.
 10. **Badge and incident validators:** the per-route rules are in `backend.md` §7 (`badges.*`, `badgeRequests.*`, `incidents.create`, `incidents.list`, `incidents.comment`, `incidents.resolve`).

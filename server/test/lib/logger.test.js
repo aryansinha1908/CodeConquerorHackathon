@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import pino from 'pino';
-import { loggerRedaction } from '../src/lib/logger.js';
+import { loggerRedaction } from '../../src/lib/logger.js';
 
 test('logger redaction removes authentication secrets and project PII', () => {
   const output = new PassThrough();
@@ -41,4 +41,17 @@ test('logger redaction removes authentication secrets and project PII', () => {
   ]) {
     assert.equal(serialized.includes(secret), false, `log unexpectedly contains ${secret}`);
   }
+});
+
+test('redaction keeps the error type, which says what went wrong', () => {
+  const output = new PassThrough();
+  const chunks = [];
+  output.on('data', (chunk) => chunks.push(chunk));
+
+  const logger = pino({ level: 'info', redact: loggerRedaction }, output);
+  logger.error({ err: new TypeError('boom'), req: { body: { name: 'Ananya Rao' } } }, 'failed');
+
+  const record = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  assert.equal(record.err.type, 'TypeError');
+  assert.equal(record.req.body.name, '[REDACTED]');
 });

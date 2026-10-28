@@ -2,9 +2,9 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/server.js",
   "scripts": {
-    "test": "LOG_LEVEL=silent node test/logger.test.js && LOG_LEVEL=silent node test/errorHandler.test.js && LOG_LEVEL=silent node test/app.integration.test.js",
+    "test": "node --test",
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
   },

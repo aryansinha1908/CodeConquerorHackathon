@@ -1,5 +1,5 @@
-// Logger used by the domain modules. console until lib/logger.js (pino) exists; server.js then
-// calls setLogger(logger) once at boot (connectRedis({ logger }) does it too). Calls use the pino
+// Logger used by the domain modules: console until server.js calls setLogger() with the pino logger
+// from lib/logger.js at boot, so services and tests never load pino themselves. Calls use the pino
 // style: log.warn({ err, ...context }, "message").
 let logger = console;
 
