@@ -91,10 +91,10 @@
 | B-14 | FIFO waitlist + auto-promotion | 6 | 3 | 2 | On reject, cancel, no-show or expiry, the next eligible waitlisted request moves to `pending` |
 | B-15 | Condition reports: check-in, check-out, return confirmation | 7, 8 | 3 | 2 | Checklist items from the resource, up to 3 photos, overall rating |
 | B-16 | Incidents + human resolution | 9 | 2 | 2 | Created by the member, by the manager on return, or by the system (overdue); outcome plus rationale required |
-| B-17 | `node-cron` sweeper | 9 | 3 | 2 | Every 5 min: reminders, no-show, overdue, waitlist expiry; idempotent; Redis-locked |
+| B-17 | `node-cron` sweeper | 9 | 3 | 2 | Every 5 min: reminders, no-show, overdue, expiry of waitlisted and undecided requests; claims each booking before acting, so it's idempotent; Redis-locked, and still runs if Redis is down |
 | B-18 | Notifications: in-app + email | 6–9 | 2 | 2 | `notifyService.send(users, event, data)`; email only for key events |
 | B-19 | Audit log + booking timeline | 10 | 3 | 2 | Append-only collection; timeline = audit entries plus condition reports merged by time |
-| B-20 | Rate limiting keyed by user or email (**never IP**) | — | 2 | 1 | `express-rate-limit` + `rate-limit-redis`; tiers in `architecture.md` §11 |
+| B-20 | Rate limiting keyed by user or email (**never IP**) | — | 2 | 1 | `express-rate-limit` with a small Redis store (`lib/redisRateLimitStore.js`); tiers in `architecture.md` §11 |
 | B-21 | pino logging, request IDs, `/health` | — | 1 | 1 | Redaction of secrets and PII |
 | B-22 | Seed script (real NIT JSR units, fictional people and inventory) | demo | 2 | 1 | `npm run seed`, idempotent; data in §9 |
 
@@ -158,15 +158,18 @@ server/
     ├── services/
     │   ├── authService.js  verificationService.js  resourceService.js
     │   ├── badgeService.js  bookingService.js  waitlistService.js
+    │   ├── bookingContext.js (engine inputs)  bookingTransitions.js (apply + audit + notify)
+    │   ├── bookingViews.js (conflict groups, timeline text)
     │   ├── incidentService.js  notifyService.js  auditService.js
-    │   ├── cacheService.js  uploadService.js  mailService.js
+    │   ├── cacheService.js  aiQuotaService.js  uploadService.js  mailService.js
     ├── engines/
     │   ├── eligibility.js  # pure: evaluate(user, resource, slot, ctx) → results[]
     │   └── stateMachine.js # pure: TRANSITIONS map + canTransition()
     ├── jobs/sweeper.js     # node-cron, every 5 min
     ├── lib/
     │   ├── AppError.js  logger.js  time.js (IST helpers)  emailPattern.js
-    │   ├── lock.js (Redis lock + Lua release)  sanitize.js
+    │   ├── log.js (logger used by domain modules)  serviceError.js
+    │   ├── lock.js (Redis lock + Lua release)  redisKeys.js  redisRateLimitStore.js  sanitize.js
     └── seed/               # index.js + data/*.js
 ```
 
@@ -362,11 +365,11 @@ export const TRANSITIONS = {
 
 ### 6.3 Waitlist promotion
 
-This runs after any transition that frees a slot: `reject`, `cancel` of a slot-holder, `markNoShow`.
+This runs after any transition that frees a slot: `reject`, `cancel` of a slot-holder, `markNoShow`, `expire` of a pending request, and `waitlist`. When a manager moves a pending request to the waitlist, promotion skips that request, or it would come straight back as the oldest. It runs under the resource lock. If the lock can't be taken, the promotion is skipped and logged, and the change that freed the slot still succeeds.
 
-1. Find `waitlisted` bookings for the same resource that overlap the freed interval, ordered by `createdAt` (FIFO).
-2. For each one, re-run the eligibility engine with fresh context: the person may have hit a cap since joining.
-3. The first one that passes and fits capacity moves to `pending` (or `approved` if the resource uses auto approval), with audit action `booking.promoted` (actor `system`) and a notification: "A slot opened up: your request moved from the waitlist to review."
+1. Find `waitlisted` bookings for the same resource that overlap the freed interval and haven't started yet, ordered by `createdAt` (FIFO).
+2. For each one, re-run the eligibility engine with fresh context: the person may have been suspended or hit a cap since joining. Every hard rule is re-checked except `BOOKING_WINDOW`, because the request was on time when it was made.
+3. **Every** request that passes and still fits capacity moves to `pending` (or `approved` if the resource uses auto approval), oldest first. Capacity is the number of units in use at the busiest moment of the slot, recounted after each promotion. Each promotion is audited as `booking.promoted` (actor `system`) and sends a notification: "A slot opened up: your request moved from the waitlist to review."
 4. The others stay waitlisted with recalculated positions. **Position = count of earlier waitlisted overlapping requests + 1**, computed on read, never stored.
 
 ### 6.4 Sweeper
@@ -440,6 +443,9 @@ Each event always creates an in-app `Notification`. Email goes out only for the 
 | `booking.requested` (manual) | Unit managers | — |
 | `booking.approved` / `rejected` / `waitlisted` / `promoted` | Borrower | ✅ |
 | `booking.cancelled` | Other party | ✅ |
+| `booking.expired` | Borrower | ✅ |
+| `booking.checked_in` | Managers | — |
+| `booking.completed` | Borrower | — |
 | `booking.reminder_start` / `reminder_end` | Borrower | ✅ |
 | `booking.no_show` | Borrower, managers | — |
 | `booking.overdue` | Borrower, managers | ✅ |
@@ -516,9 +522,17 @@ Condition photos are resized on upload (Cloudinary transformation, max width 160
 ## 10. Testing
 
 **Tools:**
-- Vitest + Supertest.
-- `mongodb-memory-server` (replica-set mode) for integration tests.
-- A local Redis via Docker (`docker run -p 6379:6379 redis:7`) for the lock, rate-limit and Lua-quota tests.
+- Node's built-in test runner (`node:test` + `node:assert`), so the test files need no test framework. Supertest is added once routes exist.
+- **Redis:** `ioredis-mock`, which also runs the Lua scripts, for the lock, cache, rate-limit and AI-quota tests. No Redis server is needed. The one check still worth doing against the real provider (Upstash) is `connectRedis()` plus `pingRedis()`.
+- **MongoDB:** the integration tests in `test/integration/` run against a real server. They're skipped unless `TEST_MONGODB_URI` is set. Each file creates its own `campuscommons_test_<random>` database and drops it at the end. Point them at a local or test server, never production.
+
+```
+cd server
+node --test                                                # everything; integration tests skip without TEST_MONGODB_URI
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017 node --test test/integration
+```
+
+The `test` script in `package.json` should be `node --test`.
 
 | Layer | Must-have cases |
 |---|---|
@@ -528,7 +542,7 @@ Condition photos are resized on upload (Cloudinary transformation, max width 160
 | Sweeper | No-show after grace → `no_show` plus promotion; overdue → flag plus system incident; running twice changes nothing |
 | Auth | Non-`nitjsr.ac.in` email → 400; wrong OTP 5 times → OTP invalidated; refresh rotation and reuse detection |
 | Rate limits | 6th failed login for one email → 429 with `Retry-After`; **a different email from the same IP is unaffected** |
-| AI quota (when C-05 lands) | 6th AI call in a day → 429 `AI_QUOTA_EXCEEDED`; cache hit doesn't consume quota; Redis down → AI disabled, normal search OK |
+| AI quota | 6th AI call in a day → 429 `AI_QUOTA_EXCEEDED`; cache hit doesn't consume quota; Redis down → AI disabled, normal search OK |
 | Golden path (e2e API script) | The full lifecycle with the seeded demo users; run against the deployed URL before submission |
 
 ---
@@ -537,6 +551,6 @@ Condition photos are resized on upload (Cloudinary transformation, max width 160
 
 | Purpose | Packages |
 |---|---|
-| Core (MVP) | `express`, `mongoose`, `ioredis`, `zod`, `jsonwebtoken`, `bcryptjs`, `cookie-parser`, `helmet`, `cors`, `express-rate-limit`, `rate-limit-redis`, `multer`, `file-type`, `cloudinary`, `nodemailer`, `node-cron`, `pino`, `pino-http`, `sanitize-html`, `date-fns`, `date-fns-tz` |
-| Dev | `vitest`, `supertest`, `mongodb-memory-server`, `pino-pretty`, `eslint`, `prettier` |
+| Core (MVP) | `express`, `mongoose`, `ioredis` (5.x: `ioredis-mock` doesn't support 6 yet), `zod`, `jsonwebtoken`, `bcryptjs`, `cookie-parser`, `helmet`, `cors`, `express-rate-limit`, `multer`, `file-type`, `cloudinary`, `nodemailer`, `node-cron`, `pino`, `pino-http`, `sanitize-html`. IST dates use the built-in `Intl` (IST has no DST), so there's no date library |
+| Dev | `ioredis-mock`, `supertest`, `pino-pretty`, `eslint`, `prettier`; tests use the built-in `node:test` |
 | Cool-to-have | `@google/genai`, `bullmq`, `@bull-board/express`, `socket.io`, `@socket.io/redis-adapter`, `pdfkit`, `ics` |
