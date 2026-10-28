@@ -5,6 +5,7 @@ import {
   formatHHmm,
   formatIstDate,
   formatIstDateTime,
+  formatIstFullDate,
   istParts,
   istWeekRange,
   istWeekStart,
@@ -54,6 +55,8 @@ describe("formatting", () => {
 
   test("IST dates for messages", () => {
     assert.equal(formatIstDate(ist("2026-11-05T14:30")), "5 Nov");
+    // 01:30 IST is still the previous day in UTC.
+    assert.equal(formatIstFullDate(ist("2027-11-05T01:30")), "5 Nov 2027");
     assert.equal(formatIstDateTime(ist("2026-11-05T14:30")), "5 Nov, 14:30");
   });
 

@@ -33,7 +33,12 @@ import {
   Resource,
   UserBadge,
 } from "../models/index.js";
-import { isAdmin, managesUnit, requireUnitManager } from "./access.js";
+import {
+  auditRole,
+  isAdmin,
+  managesUnit,
+  requireUnitManager,
+} from "./access.js";
 import { record } from "./auditService.js";
 import { loadResource, loadUser, memberContext } from "./bookingContext.js";
 import { checkBooking } from "./bookingService.js";
@@ -136,16 +141,6 @@ function requireManaged(actor, resource, message) {
     throw notFound("Resource");
   requireUnitManager(actor, resource.orgUnit, message);
 }
-
-// The capacity for the audit entry: the unit's own manager acts as "manager", even when also an
-// admin; anyone else who got past the scope check is an admin.
-const auditRole = (actor, orgUnitId) =>
-  managesUnit(
-    { ...actor, roles: (actor.roles ?? []).filter((r) => r !== "admin") },
-    orgUnitId,
-  )
-    ? "manager"
-    : "admin";
 
 // ── Parameter checks ────────────────────────────────────────────────────────
 // Routes validate with Zod first; these keep internal callers from turning a bad value into a

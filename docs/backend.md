@@ -160,7 +160,7 @@ server/
     │   ├── badgeService.js  bookingService.js  waitlistService.js
     │   ├── bookingContext.js (engine inputs)  bookingTransitions.js (apply + audit + notify)
     │   ├── bookingViews.js (conflict groups, timeline text)
-    │   ├── orgUnitService.js  access.js (isAdmin, managesUnit, requireAdmin, requireUnitManager)
+    │   ├── orgUnitService.js  access.js (isAdmin, managesUnit, requireAdmin, requireUnitManager, auditRole)
     │   ├── incidentService.js  notifyService.js  auditService.js
     │   ├── cacheService.js  aiQuotaService.js  uploadService.js  mailService.js
     ├── engines/
@@ -235,9 +235,13 @@ Indexes: text `{ title, description }`, `{ orgUnit: 1, status: 1 }`, `{ category
 Badge:     name, code, orgUnit (issuer), description, validityDays | null,
            evidenceRequired Boolean, selfServe Boolean (C-13)
 UserBadge: user, badge, status enum requested|active|rejected|revoked,
-           evidence { publicId }, note, decidedBy, decidedAt, reason, expiresAt
+           evidence { publicId }, note, requestedAt, decidedBy, decidedAt, reason, expiresAt
 ```
-Index: `{ user: 1, badge: 1 }` unique. A badge is "valid" when `status = active` and `expiresAt` is unset or later than now.
+Indexes: `{ user: 1, badge: 1 }` unique; `{ badge: 1, status: 1, requestedAt: 1 }` for the manager queue (FIFO on `requestedAt`).
+
+- A badge is "valid" when `status = active` and `expiresAt` is unset or later than now. "Expired" is worked out on read (`badgeService.badgeState`), never stored.
+- One row per user and badge tells the whole story. A member may request again after a rejection, a revocation or an expiry: the same row goes back to `requested` and the earlier decision is cleared from it (the audit log keeps it). An open request or a valid badge can't be requested again (409).
+- A direct grant turns any row into an active badge with a fresh `expiresAt`, so it also renews one that is still valid.
 
 ### Booking
 ```
@@ -410,6 +414,11 @@ Every route has a Zod schema in `validators/`. The `validate` middleware parses 
 | `bookings.cancel` | `reason: safeText(10,500)`; the service makes it required unless the actor is the borrower |
 | `bookings.checkIn` / `checkOut` | `items[]` (labels must match `resource.checklist`), `overall` enum, `notes: safeText(0,1000)`, `photos[]` ≤ 3 `{url, publicId}` from our own Cloudinary folder |
 | `bookings.confirmReturn` | `outcome: ok \| issue`; if `issue`, then `incident.{type, severity, description}` is required (`superRefine`) |
+| `badges.create` | `name: safeText(2,80)`, `code` `/^[a-z0-9-]{2,40}$/` (lower-cased), `orgUnit: objectId`, `description: safeText(0,500)`, `validityDays` int 1–3650 or `null`, `evidenceRequired?: boolean`. `selfServe` is refused until the quiz (C-13) exists |
+| `badges.request` | `note: safeText(0,500)`; multipart `evidence` (jpg/png/webp/pdf, ≤ 5 MB), uploaded first and passed on as `{ publicId }` |
+| `badgeRequests.list` | `status?` (a `USER_BADGE_STATUSES` value, default `requested`), `badgeId?: objectId`, plus pagination |
+| `badgeRequests.decide` | `decision: approve \| reject`, `reason: safeText(0,500)` (**required** to reject) |
+| `badges.grant` | `userId: objectId`, `note: safeText(0,500)` |
 | `incidents.create` | `type`, `severity` enums, `description: safeText(20,2000)`, `bookingId?`, `resourceId` |
 | `incidents.resolve` | `outcome` enum, `rationale: safeText(10,1000)` |
 | `admin.verify` | `decision` enum, `reason: safeText(5,500)` (required when rejecting), `memberType`, `department` |
@@ -453,6 +462,7 @@ Each event always creates an in-app `Notification`. Email goes out only for the 
 | `booking.overdue` | Borrower, managers | ✅ |
 | `booking.checked_out` | Managers ("confirm return") | — |
 | `incident.created` / `resolved` | Borrower, managers, admins (high severity) | ✅ |
+| `badge.requested` | Managers of the issuing unit (not the requester) | — |
 | `badge.granted` / `rejected` | User | — |
 
 The mailer never sends to `*.test` addresses (the seeded demo users).

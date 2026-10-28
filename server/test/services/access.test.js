@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import { ServiceError } from "../../src/lib/serviceError.js";
 import {
+  auditRole,
   isAdmin,
   managesUnit,
   requireAdmin,
@@ -125,5 +126,20 @@ describe("requireUnitManager", () => {
         ),
       isForbidden("You can only list resources for units you manage."),
     );
+  });
+});
+
+describe("auditRole", () => {
+  test("the unit's own manager acts as manager, even when also an admin", () => {
+    assert.equal(auditRole(manager, dic), "manager");
+    assert.equal(
+      auditRole({ ...manager, roles: ["manager", "admin"] }, dic),
+      "manager",
+    );
+    assert.equal(
+      auditRole({ ...manager, roles: ["manager", "admin"] }, cse),
+      "admin",
+    );
+    assert.equal(auditRole(admin, dic), "admin");
   });
 });

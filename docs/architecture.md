@@ -379,9 +379,13 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 | POST   | `/badges`              | manager / admin               | `name, code, orgUnit, description, validityDays?, evidenceRequired` | `general` | invalidate            |
 | GET    | `/badges/mine`         | auth                          | —                                                                   | `general` | —                     |
 | POST   | `/badges/:id/requests` | verified                      | `note`, optional multipart `evidence`                               | `upload`  | —                     |
-| GET    | `/badge-requests`      | manager (badges of own units) | `status=requested, page`                                            | `general` | —                     |
+| GET    | `/badge-requests`      | manager (badges of own units) | `status=requested, badgeId?, page, limit`                           | `general` | —                     |
 | PATCH  | `/badge-requests/:id`  | manager\*                     | `decision: approve\|reject, reason`                                 | `general` | —                     |
 | POST   | `/badges/:id/grant`    | manager\*                     | `userId, note`                                                      | `general` | —                     |
+
+- `cache:badges` stores each badge's issuer as an id. The unit's name comes from `cache:orgunits` when the list is read, so renaming a unit needs no badge invalidation. Badges of an inactive unit aren't listed, and can't be requested.
+- Nobody but an admin decides on their own badge request or grants themselves a badge, the same rule as for bookings.
+- `/badges/mine` gives each row a `state` (`active | expired | requested | rejected | revoked`) and shows evidence only as `hasEvidence`. The manager queue carries the evidence's `publicId`, which needs a signed URL to open.
 
 **Bookings**
 
@@ -715,7 +719,7 @@ This is separate from application logs. App logs are for **engineers** and get r
 - **Action names follow `entity.verb`:**
   - `user.registered`, `verification.approved`, `verification.id_viewed`
   - `resource.created`, `resource.status_changed`
-  - `badge.granted`
+  - `badge.created`, `badge.requested`, `badge.granted`, `badge.rejected`
   - `booking.requested`, `booking.approved`, `booking.rejected`, `booking.waitlisted`, `booking.promoted`, `booking.cancelled`, `booking.checked_in`, `booking.checked_out`, `booking.completed`, `booking.flagged`, `booking.no_show`, `booking.overdue`
   - `incident.created`, `incident.resolved`
   - `user.suspended`
