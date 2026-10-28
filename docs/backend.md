@@ -160,11 +160,13 @@ server/
     │   ├── badgeService.js  bookingService.js  waitlistService.js
     │   ├── bookingContext.js (engine inputs)  bookingTransitions.js (apply + audit + notify)
     │   ├── bookingViews.js (conflict groups, timeline text)
+    │   ├── orgUnitService.js  access.js (isAdmin, managesUnit, requireAdmin, requireUnitManager)
     │   ├── incidentService.js  notifyService.js  auditService.js
     │   ├── cacheService.js  aiQuotaService.js  uploadService.js  mailService.js
     ├── engines/
     │   ├── eligibility.js  # pure: evaluate(user, resource, slot, ctx) → results[]
-    │   └── stateMachine.js # pure: TRANSITIONS map + canTransition()
+    │   ├── stateMachine.js # pure: TRANSITIONS map + canTransition()
+    │   └── availability.js # pure: openWindows() and busySegments() for the availability grid
     ├── jobs/sweeper.js     # node-cron, every 5 min
     ├── lib/
     │   ├── AppError.js  logger.js  time.js (IST helpers)  emailPattern.js
