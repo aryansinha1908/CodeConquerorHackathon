@@ -82,6 +82,39 @@ export async function waitlistPosition(booking) {
   );
 }
 
+// The member's own side of the ctx: badges, hours held on this resource in `week`, active bookings.
+// Shared by both contexts below, so the checklist and the booking check count the same way.
+async function memberCounts(user, resource, week, { excludeId } = {}) {
+  const mine = {
+    resource: resource._id,
+    borrower: user._id,
+    ...except(excludeId),
+  };
+  const [userBadges, weekBookings, activeCount] = await Promise.all([
+    UserBadge.find(
+      { user: user._id },
+      { badge: 1, status: 1, expiresAt: 1 },
+    ).lean(),
+    Booking.find(
+      {
+        ...mine,
+        status: { $in: WEEKLY_HOURS_STATUSES },
+        start: { $gte: week.start, $lt: week.end },
+      },
+      { start: 1, end: 1 },
+    ).lean(),
+    Booking.countDocuments({ ...mine, status: { $in: ACTIVE_STATUSES } }),
+  ]);
+  return {
+    userBadges,
+    hoursThisWeek: weekBookings.reduce(
+      (sum, b) => sum + (b.end - b.start) / HOUR,
+      0,
+    ),
+    activeCount,
+  };
+}
+
 // excludeId: the booking being re-evaluated (waitlist promotion), so it doesn't count against itself.
 export async function eligibilityContext(
   user,
@@ -89,40 +122,20 @@ export async function eligibilityContext(
   slot,
   { now, excludeId } = {},
 ) {
-  const week = istWeekRange(slot.start);
-  const mine = {
-    resource: resource._id,
-    borrower: user._id,
-    ...except(excludeId),
-  };
-  const [userBadges, weekBookings, activeCount, overlapCount, ahead] =
-    await Promise.all([
-      UserBadge.find(
-        { user: user._id },
-        { badge: 1, status: 1, expiresAt: 1 },
-      ).lean(),
-      Booking.find(
-        {
-          ...mine,
-          status: { $in: WEEKLY_HOURS_STATUSES },
-          start: { $gte: week.start, $lt: week.end },
-        },
-        { start: 1, end: 1 },
-      ).lean(),
-      Booking.countDocuments({ ...mine, status: { $in: ACTIVE_STATUSES } }),
-      slotUsage(resource._id, slot, { excludeId }),
-      waitlistAhead(resource._id, slot, { excludeId }),
-    ]);
+  const [member, overlapCount, ahead] = await Promise.all([
+    memberCounts(user, resource, istWeekRange(slot.start), { excludeId }),
+    slotUsage(resource._id, slot, { excludeId }),
+    waitlistAhead(resource._id, slot, { excludeId }),
+  ]);
+  return { now, ...member, overlapCount, waitlistAhead: ahead };
+}
+
+// The ctx for evaluateMember when no slot is chosen (GET /resources/:id/eligibility), which also
+// feeds the quota meter. With no slot, the week is the IST week (Mon–Sun) containing `now`.
+export async function memberContext(user, resource, { now = new Date() } = {}) {
   return {
     now,
-    userBadges,
-    hoursThisWeek: weekBookings.reduce(
-      (sum, b) => sum + (b.end - b.start) / HOUR,
-      0,
-    ),
-    activeCount,
-    overlapCount,
-    waitlistAhead: ahead,
+    ...(await memberCounts(user, resource, istWeekRange(now))),
   };
 }
 
