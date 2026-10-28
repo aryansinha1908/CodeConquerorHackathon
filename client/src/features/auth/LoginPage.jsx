@@ -70,42 +70,66 @@ export default function LoginPage() {
   }, [lockoutSeconds]);
 
   // ── Submit ────────────────────────────────────────────────────────────────────
+  // const onSubmit = async (data) => {
+  //   if (lockoutSeconds > 0) return;
+  //   setIsSubmitting(true);
+  //   try {
+  //     const res = await apiLogin(data);
+  //     const { accessToken } = res.data;
+  //     setSession(accessToken);
+  //     toast.success('Welcome back!');
+  //     navigate(next, { replace: true });
+  //   } catch (err) {
+  //     if (err.code === 'VALIDATION_ERROR' && Array.isArray(err.details)) {
+  //       err.details.forEach((d) => setError(d.path, { message: d.message }));
+  //     } else if (err.code === 'INVALID_CREDENTIALS') {
+  //       setError('password', { message: 'Email or password is incorrect.' });
+  //     } else if (err.code === 'EMAIL_NOT_VERIFIED') {
+  //       toast.info('Please verify your email first.', {
+  //         action: {
+  //           label: 'Resend OTP',
+  //           onClick: () => navigate('/verify-otp', { state: { email: data.email } }),
+  //         },
+  //       });
+  //     } else if (err.code === 'RATE_LIMITED' || err.status === 429) {
+  //       const retryAfter = err.retryAfter ?? 60;
+  //       setLockoutSeconds(retryAfter);
+  //       setLockoutMsg(
+  //         `Too many failed attempts. Try again in ${formatCountdown(retryAfter)}.`
+  //       );
+  //     } else {
+  //       toast.error(err.message ?? 'Login failed', {
+  //         description: err.requestId ? `ref: ${err.requestId}` : undefined,
+  //       });
+  //     }
+  //   } finally {
+  //     setIsSubmitting(false);
+  //   }
+  // };
+
   const onSubmit = async (data) => {
-    if (lockoutSeconds > 0) return;
-    setIsSubmitting(true);
-    try {
-      const res = await apiLogin(data);
-      const { accessToken } = res.data;
-      setSession(accessToken);
+  if (lockoutSeconds > 0) return;
+
+  setIsSubmitting(true);
+
+  try {
+    // Temporary hackathon login bypass
+    if (data.email.toLowerCase().endsWith('@nitjsr.ac.in')) {
+      // If your app requires a token, use a clearly marked demo token.
+      const demoToken = 'hackathon-demo-token';
+
+      setSession(demoToken);
+
       toast.success('Welcome back!');
       navigate(next, { replace: true });
-    } catch (err) {
-      if (err.code === 'VALIDATION_ERROR' && Array.isArray(err.details)) {
-        err.details.forEach((d) => setError(d.path, { message: d.message }));
-      } else if (err.code === 'INVALID_CREDENTIALS') {
-        setError('password', { message: 'Email or password is incorrect.' });
-      } else if (err.code === 'EMAIL_NOT_VERIFIED') {
-        toast.info('Please verify your email first.', {
-          action: {
-            label: 'Resend OTP',
-            onClick: () => navigate('/verify-otp', { state: { email: data.email } }),
-          },
-        });
-      } else if (err.code === 'RATE_LIMITED' || err.status === 429) {
-        const retryAfter = err.retryAfter ?? 60;
-        setLockoutSeconds(retryAfter);
-        setLockoutMsg(
-          `Too many failed attempts. Try again in ${formatCountdown(retryAfter)}.`
-        );
-      } else {
-        toast.error(err.message ?? 'Login failed', {
-          description: err.requestId ? `ref: ${err.requestId}` : undefined,
-        });
-      }
-    } finally {
-      setIsSubmitting(false);
+      return;
     }
-  };
+
+    toast.error('Please use your NIT Jamshedpur email.');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const isLocked = lockoutSeconds > 0;
 
