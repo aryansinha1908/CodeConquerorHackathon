@@ -11,9 +11,9 @@
 // as an id; names come from the org unit catalogue at read time, so a unit rename needs no badge
 // invalidation. Holdings are per user and never cached, so a decision shows in the eligibility
 // checklist at once.
-import mongoose from "mongoose";
 import {
-  ServiceError,
+  conflict,
+  fieldError,
   forbidden,
   fromValidationError,
   invalid,
@@ -29,10 +29,21 @@ import {
   requireUnitManager,
 } from "./access.js";
 import { record } from "./auditService.js";
-import { loadUser } from "./bookingContext.js";
 import { cachedCatalogue, invalidateCatalogue } from "./cacheService.js";
 import { send } from "./notifyService.js";
 import { listOrgUnits } from "./orgUnitService.js";
+import {
+  absent,
+  assertValid,
+  isId,
+  isPlainObject,
+  readEnum,
+  readId,
+  readPaging,
+  readText,
+  requireUser,
+  sameId,
+} from "./params.js";
 
 const CATALOGUE = "badges";
 const CATALOGUE_FIELDS = {
@@ -61,9 +72,6 @@ const LOCKED = {
 const DECISIONS = ["approve", "reject"];
 const MAX_TEXT = 500;
 const MAX_PUBLIC_ID = 255;
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
-const MAX_PAGE = 10_000;
 
 // What the issuer, the member and the queue need to say about the badge.
 const BADGE_REF = {
@@ -78,79 +86,11 @@ const DECIDED = {
   revoked: "This badge has been revoked.",
 };
 
-// Mongoose 9 accepts only ObjectIds and 24-hex strings, so the mock auth's "demo-user-id-001" and
-// operator objects such as { $ne: null } are turned away before they reach a query.
-const isId = (value) => mongoose.isValidObjectId(value);
-const sameId = (a, b) => String(a?._id ?? a) === String(b?._id ?? b);
-
-const isPlainObject = (v) =>
-  v !== null &&
-  typeof v === "object" &&
-  [Object.prototype, null].includes(Object.getPrototypeOf(v));
-
 // What Redis hands back: ids and dates as strings. A cache miss returns the same.
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-const absent = (value) => value === undefined || value === null || value === "";
-
-const fieldError = (path, message) =>
-  invalid("1 field is invalid.", [{ path, message }]);
-
-const conflict = (message) =>
-  new ServiceError(409, "INVALID_TRANSITION", message);
-
 const changedMeanwhile = () =>
   conflict("This badge changed while you were saving. Reload and try again.");
-
-async function requireUser(userId) {
-  const user = isId(userId) ? await loadUser(userId) : null;
-  if (!user) throw notFound("User");
-  return user;
-}
-
-// ── Parameter checks ────────────────────────────────────────────────────────
-// Routes validate with Zod first; these keep internal callers from turning a bad value into a
-// CastError (a 500) or an unbounded read, and report every problem at once.
-
-function assertValid(problems, noun = "field") {
-  const n = problems.length;
-  if (!n) return;
-  throw invalid(
-    n === 1 ? `1 ${noun} is invalid.` : `${n} ${noun}s are invalid.`,
-    problems,
-  );
-}
-
-// Blank counts as absent. → the trimmed text, or undefined.
-function readText(value, path, problems, { required, requiredMessage } = {}) {
-  if (!absent(value) && typeof value !== "string") {
-    problems.push({ path, message: "Must be text." });
-    return undefined;
-  }
-  const text = value?.trim();
-  if (!text) {
-    if (required)
-      problems.push({ path, message: requiredMessage ?? "Required." });
-    return undefined;
-  }
-  if (text.length > MAX_TEXT)
-    problems.push({ path, message: `Can be at most ${MAX_TEXT} characters.` });
-  return text;
-}
-
-function readEnum(value, allowed, path, problems) {
-  if (absent(value)) return undefined;
-  if (allowed.includes(value)) return value;
-  problems.push({ path, message: `Must be one of: ${allowed.join(", ")}.` });
-  return undefined;
-}
-
-function readId(value, path, problems) {
-  if (absent(value)) return undefined;
-  if (isId(value)) return String(value).toLowerCase();
-  problems.push({ path, message: "Must be a valid id." });
-  return undefined;
-}
 
 // The upload service's result for the multipart file: { publicId } of a Cloudinary `authenticated`
 // asset (backend.md §8.4). The controller uploads, then calls requestBadge with it.
@@ -168,23 +108,6 @@ function readEvidence(value, problems) {
     message: "Must be an uploaded file's { publicId }.",
   });
   return undefined;
-}
-
-// limit is capped rather than refused, so an over-eager client still gets a page.
-function readPaging({ page, limit }, problems) {
-  const p = absent(page) ? 1 : Number(page);
-  const l = absent(limit) ? DEFAULT_LIMIT : Number(limit);
-  if (!Number.isInteger(p) || p < 1 || p > MAX_PAGE)
-    problems.push({
-      path: "page",
-      message: `Must be a whole number from 1 to ${MAX_PAGE}.`,
-    });
-  if (!Number.isInteger(l) || l < 1)
-    problems.push({
-      path: "limit",
-      message: "Must be a whole number above 0.",
-    });
-  return { page: p, limit: Math.min(l, MAX_LIMIT) };
 }
 
 // ── Views ───────────────────────────────────────────────────────────────────
@@ -310,6 +233,7 @@ export async function createBadge(actorId, input, { requestId } = {}) {
         path,
         message: LOCKED[path] ?? "This field can't be set.",
       })),
+    "field",
   );
   if (!isId(fields.orgUnit)) {
     throw fieldError(
@@ -396,14 +320,14 @@ export async function requestBadge(
 
   if (!isPlainObject(input)) throw invalid("Send the request as an object.");
   const problems = [];
-  const note = readText(input.note, "note", problems);
+  const note = readText(input.note, "note", problems, { max: MAX_TEXT });
   const evidence = readEvidence(input.evidence, problems);
   if (badge.evidenceRequired && !evidence && !problems.length)
     problems.push({
       path: "evidence",
       message: "This badge needs evidence, such as a training certificate.",
     });
-  assertValid(problems);
+  assertValid(problems, "field");
 
   const [unit, existing] = await Promise.all([
     OrgUnit.findById(badge.orgUnit, {
@@ -591,10 +515,11 @@ export async function decideBadgeRequest(
   if (absent(input.decision))
     problems.push({ path: "decision", message: "Required." });
   const reason = readText(input.reason, "reason", problems, {
+    max: MAX_TEXT,
     required: decision === "reject",
     requiredMessage: "Say why, so the member knows what to do next.",
   });
-  assertValid(problems);
+  assertValid(problems, "field");
   if (row.status !== "requested")
     throw conflict(DECIDED[row.status] ?? "This request has been decided.");
 
@@ -665,8 +590,8 @@ export async function grantBadge(
   const userId = readId(input.userId, "userId", problems);
   if (absent(input.userId))
     problems.push({ path: "userId", message: "Required." });
-  const note = readText(input.note, "note", problems);
-  assertValid(problems);
+  const note = readText(input.note, "note", problems, { max: MAX_TEXT });
+  assertValid(problems, "field");
   const member = await User.findById(userId, { _id: 1 }).lean();
   if (!member) throw fieldError("userId", "No such user.");
   refuseOwn(

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import {
   ServiceError,
+  conflict,
+  fieldError,
   fromValidationError,
   invalid,
 } from "../../src/lib/serviceError.js";
@@ -114,5 +116,29 @@ describe("fromValidationError", () => {
     assert.equal(fromValidationError(service), service);
     assert.equal(fromValidationError(cast), cast);
     assert.equal(fromValidationError(undefined), undefined);
+  });
+});
+
+describe("fieldError and conflict", () => {
+  test("one bad field is a 400 with that field's detail", () => {
+    const err = fieldError("orgUnit", "No such unit.");
+    assert.ok(err instanceof ServiceError);
+    assert.deepEqual(
+      [err.status, err.code, err.message, err.details],
+      [
+        400,
+        "VALIDATION_ERROR",
+        "1 field is invalid.",
+        [{ path: "orgUnit", message: "No such unit." }],
+      ],
+    );
+  });
+
+  test("a conflict is 409 INVALID_TRANSITION with the given message", () => {
+    const err = conflict("Reload and try again.");
+    assert.deepEqual(
+      [err.status, err.code, err.message, err.details],
+      [409, "INVALID_TRANSITION", "Reload and try again.", undefined],
+    );
   });
 });

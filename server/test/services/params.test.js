@@ -4,11 +4,16 @@ import mongoose from "mongoose";
 import {
   MAX_LIMIT,
   assertValid,
+  isPlainObject,
+  readEnum,
+  readEnumList,
   readFlag,
   readId,
   readInstant,
   readMatch,
   readPaging,
+  readText,
+  sameId,
 } from "../../src/services/params.js";
 
 const read = (fn) => {
@@ -74,6 +79,96 @@ describe("params", () => {
       ),
       ["page", "limit"],
     );
+  });
+
+  test("readEnum and readEnumList; required values", () => {
+    const allowed = ["open", "in_review", "resolved"];
+    assert.equal(read((p) => readEnum("open", allowed, "s", p)).value, "open");
+    assert.deepEqual(
+      read((p) => readEnum("", allowed, "s", p)),
+      {
+        value: undefined,
+        problems: [],
+      },
+    );
+    assert.deepEqual(
+      read((p) => readEnum(undefined, allowed, "s", p, { required: true }))
+        .problems,
+      [{ path: "s", message: "Required." }],
+    );
+    assert.match(
+      read((p) => readEnum("closed", allowed, "s", p)).problems[0].message,
+      /one of: open, in_review, resolved/,
+    );
+
+    // Sorted and de-duplicated, from a list or a comma string.
+    assert.deepEqual(
+      read((p) => readEnumList(" resolved,open,open", allowed, "s", p)).value,
+      ["open", "resolved"],
+    );
+    assert.deepEqual(
+      read((p) => readEnumList(["in_review"], allowed, "s", p)).value,
+      ["in_review"],
+    );
+    for (const bad of ["open,closed", [], { $in: ["open"] }, ","])
+      assert.equal(
+        read((p) => readEnumList(bad, allowed, "s", p)).problems.length,
+        1,
+        JSON.stringify(bad),
+      );
+
+    assert.deepEqual(
+      read((p) => readInstant(null, "at", p, { required: true })).problems,
+      [{ path: "at", message: "Required." }],
+    );
+  });
+
+  test("readText trims, treats blank as absent and checks length", () => {
+    assert.equal(read((p) => readText("  hi  ", "t", p)).value, "hi");
+    assert.deepEqual(
+      read((p) => readText("   ", "t", p)),
+      {
+        value: undefined,
+        problems: [],
+      },
+    );
+    assert.deepEqual(
+      read((p) =>
+        readText(" ", "t", p, { required: true, requiredMessage: "Say why." }),
+      ).problems,
+      [{ path: "t", message: "Say why." }],
+    );
+    assert.deepEqual(read((p) => readText(5, "t", p)).problems, [
+      { path: "t", message: "Must be text." },
+    ]);
+    assert.deepEqual(
+      read((p) => readText("short", "t", p, { min: 20 })).problems,
+      [{ path: "t", message: "Must be at least 20 characters." }],
+    );
+    assert.deepEqual(
+      read((p) => readText("x".repeat(6), "t", p, { max: 5 })).problems,
+      [{ path: "t", message: "Can be at most 5 characters." }],
+    );
+    // No max: any length.
+    assert.equal(
+      read((p) => readText("x".repeat(5000), "t", p)).problems.length,
+      0,
+    );
+  });
+
+  test("sameId and isPlainObject", () => {
+    const id = new mongoose.Types.ObjectId();
+    assert.equal(sameId(id, String(id)), true);
+    assert.equal(sameId({ _id: id }, id), true);
+    assert.equal(sameId(id, new mongoose.Types.ObjectId()), false);
+    // A missing id never matches, not even another missing one.
+    assert.equal(sameId(undefined, undefined), false);
+    assert.equal(sameId(null, id), false);
+
+    assert.equal(isPlainObject({}), true);
+    assert.equal(isPlainObject(Object.create(null)), true);
+    for (const v of [null, [], new Date(), "x", new mongoose.Types.ObjectId()])
+      assert.equal(isPlainObject(v), false);
   });
 
   test("assertValid throws one 400 with every problem", () => {

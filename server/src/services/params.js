@@ -1,9 +1,7 @@
-// Input checks shared by the read services. Routes validate with Zod first; these keep internal
-// callers from turning a bad value into a CastError (a 500) or an unbounded read, and report every
-// problem at once as 400 VALIDATION_ERROR with { path, message } details.
-//
-// resourceService, badgeService and incidentService still carry their own copies of most of these;
-// moving them over is mechanical.
+// Input checks shared by the services. Routes validate with Zod first; these keep internal callers
+// from turning a bad value into a CastError (a 500) or an unbounded read, and report every problem
+// at once as 400 VALIDATION_ERROR with { path, message } details. Each read* function returns the
+// clean value, or undefined after pushing a problem.
 import mongoose from "mongoose";
 import { invalid, notFound } from "../lib/serviceError.js";
 import { User } from "../models/index.js";
@@ -18,6 +16,15 @@ export const isId = (value) => mongoose.isValidObjectId(value);
 
 export const absent = (value) =>
   value === undefined || value === null || value === "";
+
+export const isPlainObject = (v) =>
+  v !== null &&
+  typeof v === "object" &&
+  [Object.prototype, null].includes(Object.getPrototypeOf(v));
+
+// Populated documents and raw ids compare the same way; a missing id equals nothing.
+export const sameId = (a, b) =>
+  a != null && b != null && String(a?._id ?? a) === String(b?._id ?? b);
 
 export function assertValid(problems, noun = "parameter") {
   const n = problems.length;
@@ -36,6 +43,57 @@ export function readId(value, path, problems) {
   return undefined;
 }
 
+export function readEnum(value, allowed, path, problems, { required } = {}) {
+  if (absent(value)) {
+    if (required) problems.push({ path, message: "Required." });
+    return undefined;
+  }
+  if (allowed.includes(value)) return value;
+  problems.push({ path, message: `Must be one of: ${allowed.join(", ")}.` });
+  return undefined;
+}
+
+// One value or several, as a list or "a,b" from a query string. → sorted and de-duplicated, so a
+// cache key doesn't depend on the order they were sent in.
+export function readEnumList(value, allowed, path, problems) {
+  if (absent(value)) return undefined;
+  const list = typeof value === "string" ? value.split(",") : value;
+  const values = Array.isArray(list)
+    ? [...new Set(list.map((v) => (typeof v === "string" ? v.trim() : v)))]
+    : [];
+  if (values.length && values.every((v) => allowed.includes(v)))
+    return values.sort();
+  problems.push({
+    path,
+    message: `Must be one or more of: ${allowed.join(", ")}.`,
+  });
+  return undefined;
+}
+
+// Trimmed; blank counts as absent. min and max are in characters; with no max, any length passes.
+export function readText(
+  value,
+  path,
+  problems,
+  { required, requiredMessage, min = 1, max } = {},
+) {
+  if (!absent(value) && typeof value !== "string") {
+    problems.push({ path, message: "Must be text." });
+    return undefined;
+  }
+  const text = value?.trim();
+  if (!text) {
+    if (required)
+      problems.push({ path, message: requiredMessage ?? "Required." });
+    return undefined;
+  }
+  if (text.length < min)
+    problems.push({ path, message: `Must be at least ${min} characters.` });
+  else if (max !== undefined && text.length > max)
+    problems.push({ path, message: `Can be at most ${max} characters.` });
+  return text;
+}
+
 // Only a literal true or "true" counts, so an unparsed "false" from a query string isn't true.
 export function readFlag(value, path, problems) {
   if (absent(value) || value === false || value === "false") return false;
@@ -52,8 +110,11 @@ export function readMatch(value, pattern, path, problems, message) {
   return undefined;
 }
 
-export function readInstant(value, path, problems) {
-  if (absent(value)) return undefined;
+export function readInstant(value, path, problems, { required } = {}) {
+  if (absent(value)) {
+    if (required) problems.push({ path, message: "Required." });
+    return undefined;
+  }
   const date = ["string", "number"].includes(typeof value)
     ? new Date(value)
     : value instanceof Date

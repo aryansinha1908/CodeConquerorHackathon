@@ -5,10 +5,9 @@
 // The catalogue is one shared cache entry, cache:orgunits (architecture.md §10). It holds every unit,
 // active or not, with its managers, so includeInactive and includeManagers filter in memory and
 // every view shares the entry.
-import mongoose from "mongoose";
 import { keys } from "../lib/redisKeys.js";
 import {
-  ServiceError,
+  conflict,
   fromValidationError,
   invalid,
   notFound,
@@ -16,7 +15,6 @@ import {
 import { Badge, OrgUnit, Resource, User } from "../models/index.js";
 import { requireAdmin } from "./access.js";
 import { record } from "./auditService.js";
-import { loadUser } from "./bookingContext.js";
 import {
   bumpVersion,
   cachedCatalogue,
@@ -24,6 +22,7 @@ import {
   del,
   invalidateCatalogue,
 } from "./cacheService.js";
+import { isId, requireUser } from "./params.js";
 
 const CATALOGUE = "orgunits";
 const CATALOGUE_FIELDS = {
@@ -46,26 +45,17 @@ const LOCKED = {
   managers: "Managers are assigned separately.",
 };
 
-// architecture.md §6 has no conflict code of its own; this is the one setResourceStatus uses too.
 const changedMeanwhile = () =>
-  new ServiceError(
-    409,
-    "INVALID_TRANSITION",
-    "Someone else changed this unit's managers. Reload and try again.",
+  conflict("Someone else changed this unit's managers. Reload and try again.");
+
+const requireAdminActor = async (actorId) =>
+  requireAdmin(
+    await requireUser(actorId),
+    "Only an admin can manage org units.",
   );
 
-// The actor id comes from req.user. One that isn't an ObjectId (the mock auth's "demo-user-id-001")
-// is an unknown user, not a CastError.
-async function requireAdminActor(actorId) {
-  const actor = mongoose.isValidObjectId(actorId)
-    ? await loadUser(actorId)
-    : null;
-  if (!actor) throw notFound("User");
-  return requireAdmin(actor, "Only an admin can manage org units.");
-}
-
 async function findUnit(orgUnitId, { lean = true } = {}) {
-  if (!mongoose.isValidObjectId(orgUnitId)) throw notFound("Org unit");
+  if (!isId(orgUnitId)) throw notFound("Org unit");
   const query = OrgUnit.findById(orgUnitId);
   const unit = await (lean ? query.lean() : query);
   if (!unit) throw notFound("Org unit");
@@ -273,7 +263,7 @@ async function resolveManagers(managerIds) {
   const firstIndex = new Map();
   const bad = [];
   managerIds.forEach((raw, index) => {
-    if (!mongoose.isValidObjectId(raw)) {
+    if (!isId(raw)) {
       bad.push({ index, message: "Must be a valid id." });
       return;
     }

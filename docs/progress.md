@@ -2,11 +2,11 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `6d62cf3` (the post-merge review fixes). `main` has everything through PR #8 (`4ae34a9`). The notification and audit reads (§2, last row) are in the working tree, **not yet committed**.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `1a59fed` (the notification and audit reads). `main` has everything through PR #9 (`623e78f`). Moving the services onto `params.js` (§2, last row) is in the working tree, **not yet committed**.
 
 **Tests:**
-- `npm test` (`node --test`, every file): **240 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
-- With a real MongoDB: **417 pass** (177 of them integration), run twice in a row with no flaky failures.
+- `npm test` (`node --test`, every file): **245 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
+- With a real MongoDB: **423 pass** (178 of them integration), run twice in a row with no flaky failures.
 
 ---
 
@@ -40,7 +40,8 @@ The running record of what's built, what was decided and what's left. Read this 
 | `46da3d6` | **Incident service** (B-16): report, list, detail, comments, resolve; resolving the last open incident of a flagged booking closes it. Mutation check: 30 guards broken on purpose, 29 caught. The survivor only drops a projection that keeps comment text out of list reads, which nothing can observe |
 | `a81ae2f` | (Teammate, PR #6) **pino logging:** `lib/logger.js` with redaction, `X-Request-Id`, the HTTP log, `app.js` split from `server.js`, graceful shutdown, a first error handler |
 | `6d62cf3` | **Post-merge review fixes** (PR #8): the server crashed at boot (`setRedisLogger` ReferenceError in `connectRedis`, reached once `server.js` passed a logger); `npm test` ran 7 of 226 tests; `.gitignore` only ignored `server/.env`; the error handler dropped `code`, `details` and `headers` and turned every 400 into "Invalid request"; `verifyAuth` had no `UNAUTHENTICATED` code; `/health` said ok with MongoDB down; the request log's route was always "[unmatched route]" |
-| _uncommitted_ | **Notification and audit reads** (B-18, B-19): `listNotifications` (with the unread count in `meta`), `unreadCount`, `markRead`, `markAllRead`, and `listAudit` scoped by role; `services/params.js` for shared input checks. Mutation check: 19 guards broken on purpose, all caught |
+| `1a59fed` | **Notification and audit reads** (B-18, B-19, PR #9): `listNotifications` (with the unread count in `meta`), `unreadCount`, `markRead`, `markAllRead`, and `listAudit` scoped by role; `services/params.js` for shared input checks. Mutation check: 19 guards broken on purpose, all caught |
+| _uncommitted_ | **One set of input checks:** the resource, badge, incident, booking and org-unit services use `services/params.js` and `fieldError` / `conflict` from `lib/serviceError.js` instead of their own copies (264 lines fewer in those five services, 194 fewer in `src/` overall). Behaviour is unchanged except in the booking service: its `requireUser` now checks the id, so the mock auth's `"demo-user-id-001"` is 404 instead of a CastError, and `listMine` / `listForManager` now check `status`, `resourceId`, `from`, `to` and paging (limit capped at 50) like the other list functions. Re-ran the earlier mutation checks (same results) plus 11 on the shared helpers, all caught |
 
 ---
 
@@ -90,7 +91,8 @@ The running record of what's built, what was decided and what's left. Read this 
 | `services/bookingContext.js`, `bookingTransitions.js`, `bookingViews.js`, `waitlistService.js` | Engine inputs; apply + audit + notify; conflict groups and timeline text; promotion |
 | `services/resourceService.js` | `listResources`, `getResource`, `getAvailability`, `getEligibility`, `createResource`, `updateResource`, `setResourceStatus`, `listResourceBookings` |
 | `services/orgUnitService.js` | `listOrgUnits`, `createOrgUnit`, `updateOrgUnit`, `setOrgUnitManagers` |
-| `services/params.js` | Shared input checks: `isId`, `absent`, `assertValid`, `readId`, `readFlag`, `readMatch`, `readInstant`, `readPaging`, `requireUser` |
+| `services/params.js` | Shared input checks used by every service: `isId`, `absent`, `isPlainObject`, `sameId`, `assertValid`, `readId`, `readEnum`, `readEnumList`, `readText`, `readFlag`, `readMatch`, `readInstant`, `readPaging`, `requireUser`. Checks only one service needs (`readWeekday`, `readEvidence`, `readPhotos`) stay in that service |
+| `lib/serviceError.js` | `ServiceError`, `notFound`, `forbidden`, `invalid`, `fieldError`, `conflict` (409 `INVALID_TRANSITION`), `fromValidationError` |
 | `services/incidentService.js` | `createIncident`, `listIncidents`, `getIncident`, `addComment`, `resolveIncident` |
 | `services/badgeService.js` | `listBadges`, `createBadge`, `listMyBadges`, `requestBadge`, `listBadgeRequests`, `decideBadgeRequest`, `grantBadge`, `badgeState` |
 | `services/access.js` | `isAdmin`, `managesUnit`, `requireAdmin`, `requireUnitManager`, `auditRole` (moved here from `resourceService`) |
@@ -245,13 +247,11 @@ The high-severity fixes:
 - **Badge evidence upload:** the controller must upload the file (`uploadService`, not built yet) before it calls `requestBadge`, so an upload for a request the service then refuses is left orphaned in Cloudinary. Either check first with a cheap read, or delete the asset on a refusal.
 - **Incident strikes aren't transactional either:** a failed strike increment after the incident is resolved leaves the strike uncounted, and a retry only answers 409.
 - **Incident photos** come from the upload service (not built), like badge evidence.
-- **Shared parameter helpers:** `services/params.js` exists, and the notification and audit reads use it. `resourceService`, `badgeService` and `incidentService` still carry their own copies of `requireUser`, `readPaging`, `readId` and friends; moving them over is mechanical, best done before the controllers land.
 - **No badge revoke action yet.** The `revoked` status is supported everywhere it's read, but nothing sets it. It isn't in the route table either.
 
 ---
 
 ## 11. Next steps (resume here)
 
-1. **Move the older services onto `services/params.js`** (mechanical; the test suites cover it).
-2. **Routes and controllers** for resources, org units, bookings, badges, incidents, notifications and the audit log, once the validators and real-user auth land.
-3. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
+1. **Routes and controllers** for resources, org units, bookings, badges, incidents, notifications and the audit log, once the validators and real-user auth land.
+2. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
