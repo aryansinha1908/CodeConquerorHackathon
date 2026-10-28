@@ -103,7 +103,7 @@ export function AuthLayout({ title, subtitle, children }) {
       <main
         className="
           flex-1 flex items-center justify-center
-          bg-[#f5f0e8] px-4 py-12
+          bg-[#f5f0e8]/85 px-4 py-12
         "
         id="auth-form"
       >

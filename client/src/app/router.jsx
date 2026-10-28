@@ -14,12 +14,16 @@ import LoginPage from '../features/auth/LoginPage';
 import RegisterPage from '../features/auth/RegisterPage';
 import VerifyOtpPage from '../features/auth/VerifyOtpPage';
 
-// Lazy loaded pages
+// Lazy loaded feature pages
 const ExplorePage = lazy(() => import('../pages/ExplorePage'));
 const ResourceDetailPage = lazy(() => import('../pages/ResourceDetailPage'));
 const VerificationPage = lazy(() => import('../features/verification/VerificationPage'));
+const MyBookingsPage = lazy(() => import('../features/bookings/MyBookingsPage'));
+const BookingDetailPage = lazy(() => import('../features/bookings/BookingDetailPage').then(m => ({ default: m.BookingDetailPage })));
+const CheckInOutWizard = lazy(() => import('../features/bookings/components/CheckInOutWizard').then(m => ({ default: m.CheckInOutWizard })));
+const ReviewQueuePage = lazy(() => import('../features/manage/ReviewQueuePage'));
+
 import {
-  BookingsPlaceholder,
   BadgesPlaceholder,
   ManagePlaceholder,
   AdminPlaceholder,
@@ -99,7 +103,31 @@ export const router = createBrowserRouter([
         path: '/bookings',
         element: (
           <Suspense fallback={<PageFallback />}>
-            <BookingsPlaceholder />
+            <MyBookingsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/bookings/:id',
+        element: (
+          <Suspense fallback={<PageFallback />}>
+            <BookingDetailPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/bookings/:id/check-in',
+        element: (
+          <Suspense fallback={<PageFallback />}>
+            <CheckInOutWizard mode="check-in" />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/bookings/:id/check-out',
+        element: (
+          <Suspense fallback={<PageFallback />}>
+            <CheckInOutWizard mode="check-out" />
           </Suspense>
         ),
       },
@@ -123,7 +151,15 @@ export const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <ManagePlaceholder />,
+            element: <Navigate to="/manage/requests" replace />,
+          },
+          {
+            path: 'requests',
+            element: (
+              <Suspense fallback={<PageFallback />}>
+                <ReviewQueuePage />
+              </Suspense>
+            ),
           },
           {
             path: '*',

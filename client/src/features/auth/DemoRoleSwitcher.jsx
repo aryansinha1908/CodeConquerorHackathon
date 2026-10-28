@@ -23,7 +23,7 @@ export function DemoRoleSwitcher({ roles, onLogin }) {
     setLoading(role);
     try {
       const res = await demoLogin(role);
-      onLogin(res.data.accessToken);
+      onLogin(res.data.accessToken, res.data.user);
       toast.success(`Logged in as demo ${ROLE_LABELS[role]?.label ?? role}`);
     } catch (err) {
       toast.error(err.message ?? 'Demo login failed');

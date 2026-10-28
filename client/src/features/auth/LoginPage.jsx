@@ -140,8 +140,8 @@ export default function LoginPage() {
     >
       {/* Demo role switcher — only shown when DEMO_MODE */}
       {demoConfig?.demoMode && (
-        <DemoRoleSwitcher roles={demoConfig.roles} onLogin={(token) => {
-          setSession(token);
+        <DemoRoleSwitcher roles={demoConfig.roles} onLogin={(token, user) => {
+          setSession(token, user);
           navigate(next, { replace: true });
         }} />
       )}

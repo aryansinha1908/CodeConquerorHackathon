@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getResource, getAvailability } from '../features/resources/api';
 import { EligibilityChecklist } from '../features/resources/components/EligibilityChecklist';
 import { AvailabilityGrid } from '../features/resources/components/AvailabilityGrid';
+import { BookingPanel } from '../features/bookings/components/BookingPanel';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -189,6 +190,9 @@ export default function ResourceDetailPage() {
 
           {/* 7-Day Availability Grid */}
           <AvailabilityGrid resource={resource} availability={availability} />
+
+          {/* Booking Panel with Live Pre-check */}
+          <BookingPanel resource={resource} />
         </div>
       </div>
     </div>

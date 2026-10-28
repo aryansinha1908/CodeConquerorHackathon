@@ -54,7 +54,7 @@ export function AppLayout() {
     }`;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f5f0e8] text-[#1a1a1a] font-mono selection:bg-[#c0392b] selection:text-white">
+    <div className="min-h-screen flex flex-col bg-[#f5f0e8]/85 text-[#1a1a1a] font-mono selection:bg-[#c0392b] selection:text-white">
       {/* Skip to main content link for a11y */}
       <a href="#main-content" className="skip-link">
         Skip to main content
