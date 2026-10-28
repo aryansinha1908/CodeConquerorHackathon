@@ -88,10 +88,10 @@ function canonical(value) {
   );
 }
 
+export const canonicalJSON = (value) => JSON.stringify(canonical(value));
+
 export const hashQuery = (query) =>
-  createHash("sha1")
-    .update(JSON.stringify(canonical(query)))
-    .digest("hex");
+  createHash("sha1").update(canonicalJSON(query)).digest("hex");
 
 // ── Resources and catalogues ────────────────────────────────────────────────
 
