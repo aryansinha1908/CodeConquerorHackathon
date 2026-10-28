@@ -119,6 +119,15 @@ describe("allowed transitions", () => {
       "booking.expired",
     ],
     [
+      "expire",
+      "pending",
+      SYSTEM,
+      {},
+      minutesFrom(START, 1),
+      "expired",
+      "booking.expired",
+    ],
+    [
       "checkIn",
       "approved",
       borrower,
@@ -406,10 +415,24 @@ describe("time guards", () => {
     );
   });
 
-  test("a waitlisted request expires only once its slot has started", () => {
+  test("a waitlisted or pending request expires only once its slot has started", () => {
+    for (const status of ["waitlisted", "pending"]) {
+      assert.equal(
+        attempt(status, "expire", SYSTEM, {}, BEFORE).code,
+        "INVALID_TRANSITION",
+      );
+    }
+  });
+
+  test("an expiring pending request frees its slot; a waitlisted one never held it", () => {
+    const after = minutesFrom(START, 1);
     assert.equal(
-      attempt("waitlisted", "expire", SYSTEM, {}, BEFORE).code,
-      "INVALID_TRANSITION",
+      attempt("pending", "expire", SYSTEM, {}, after).freesSlot,
+      true,
+    );
+    assert.equal(
+      attempt("waitlisted", "expire", SYSTEM, {}, after).freesSlot,
+      false,
     );
   });
 });

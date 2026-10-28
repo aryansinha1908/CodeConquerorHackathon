@@ -92,11 +92,40 @@ const TEMPLATES = {
           body: `You didn't check in for ${d.resourceTitle} on ${d.when}, so the slot was released.`,
           link: bookingLink(d),
         },
-  "booking.expired": (d) => ({
-    title: "Waitlist request expired",
-    body: `The slot for ${d.resourceTitle} on ${d.when} started before a place opened up.`,
-    link: bookingLink(d),
+  "booking.expired": (d) =>
+    d.from === "pending"
+      ? {
+          title: "Request expired",
+          body: `Your request for ${d.resourceTitle} on ${d.when} wasn't reviewed before the slot started, so it expired.`,
+          link: bookingLink(d),
+        }
+      : {
+          title: "Waitlist request expired",
+          body: `The slot for ${d.resourceTitle} on ${d.when} started before a place opened up.`,
+          link: bookingLink(d),
+        },
+  "booking.reminder_start": (d) => ({
+    title: "Your booking starts soon",
+    body: `${d.resourceTitle}, ${d.when}. You can check in from 15 minutes before the start.`,
+    link: `/bookings/${d.bookingId}/check-in`,
   }),
+  "booking.reminder_end": (d) => ({
+    title: "Return due soon",
+    body: `Your booking for ${d.resourceTitle} (${d.when}) ends soon. Please check out on time.`,
+    link: `/bookings/${d.bookingId}/check-out`,
+  }),
+  "booking.overdue": (d) =>
+    d.audience === "manager"
+      ? {
+          title: "Overdue return",
+          body: `${d.borrowerName} hasn't returned ${d.resourceTitle} (${d.when}). A delay incident was opened.`,
+          link: "/manage/handovers",
+        }
+      : {
+          title: "Return overdue",
+          body: `${d.resourceTitle} was due back at the end of ${d.when}. Please return it and check out now.`,
+          link: `/bookings/${d.bookingId}/check-out`,
+        },
   "incident.created": (d) => ({
     title: "Incident reported",
     body: `A ${d.severity}-severity ${d.type} incident was reported for ${d.resourceTitle}.`,

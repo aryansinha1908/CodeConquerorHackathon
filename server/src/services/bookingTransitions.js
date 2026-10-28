@@ -105,7 +105,7 @@ export async function applyTransition({
     NOTIFY[check.action](updated, resource, check.relations),
     updated,
     resource,
-    { reason, ...notifyExtra },
+    { reason, from: check.from, ...notifyExtra },
   );
   return updated;
 }

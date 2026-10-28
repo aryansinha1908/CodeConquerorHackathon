@@ -343,7 +343,7 @@ export const TRANSITIONS = {
   waitlist:       { from: ['pending'],              to: 'waitlisted',  by: ['unitManager', 'admin'], reason: true  },
   cancel:         { from: ['pending', 'approved', 'waitlisted'], to: 'cancelled', by: ['borrower', 'unitManager', 'admin'], reason: 'ifNotBorrower' },
   promote:        { from: ['waitlisted'],           to: 'pending',     by: ['system'] },
-  expire:         { from: ['waitlisted'],           to: 'expired',     by: ['system'] },
+  expire:         { from: ['waitlisted', 'pending'], to: 'expired',    by: ['system'] },  // undecided requests expire at start
   checkIn:        { from: ['approved'],             to: 'checked_in',  by: ['borrower', 'unitManager'], report: 'check_in' },
   markNoShow:     { from: ['approved'],             to: 'no_show',     by: ['system'] },
   checkOut:       { from: ['checked_in'],           to: 'checked_out', by: ['borrower', 'unitManager'], report: 'check_out' },

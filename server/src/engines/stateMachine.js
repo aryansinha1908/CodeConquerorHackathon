@@ -103,11 +103,14 @@ export const TRANSITIONS = {
     by: ["system"],
     audit: "booking.promoted",
   },
+  // A pending request nobody decided on before its start expires too, so it stops counting toward
+  // the borrower's active bookings; it held the slot, so the waitlist behind it moves up.
   expire: {
-    from: ["waitlisted"],
+    from: ["waitlisted", "pending"],
     to: "expired",
     by: ["system"],
     guard: startPassed,
+    freesSlot: true,
     audit: "booking.expired",
   },
   checkIn: {

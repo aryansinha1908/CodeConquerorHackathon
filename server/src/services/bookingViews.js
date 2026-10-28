@@ -84,7 +84,10 @@ const VERBS = {
     statusTo(e) === "approved"
       ? "promoted this request from the waitlist and confirmed it"
       : "promoted this request from the waitlist",
-  "booking.expired": () => "expired the waitlisted request",
+  "booking.expired": (e) =>
+    statusFrom(e) === "pending"
+      ? "expired the request (not reviewed before the start)"
+      : "expired the waitlisted request",
   "booking.checked_in": () => "checked in",
   "booking.no_show": () => "marked a no-show",
   "booking.checked_out": () => "checked out",
