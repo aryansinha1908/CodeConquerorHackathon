@@ -2,11 +2,11 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 28 Oct 2026. **Branch:** `Aryan`, last pushed commit `549917d`, which is also on `main` up to PR #4.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `9294dac` (the badge service). `main` has everything up to `549917d` through PR #4. The incident service (§2, last row) is in the working tree, **not yet committed**.
 
 **Tests:**
-- `npm test`: **218 pass**.
-- Integration suite against a real MongoDB: **117 pass**, run twice in a row with no flaky failures.
+- `npm test`: **219 pass**.
+- Integration suite against a real MongoDB: **168 pass** (30 for badges, 21 for incidents), run twice in a row with no flaky failures.
 
 ---
 
@@ -36,6 +36,8 @@ The running record of what's built, what was decided and what's left. Read this 
 | `612315c` | Security clean-up: untracked `server/.env`, deleted the committed `cookies.txt` jars, added `.env.example` |
 | `b7b49e2` | **Wiring:** `config/db.js` (`strictQuery: "throw"`); `server.js` connects MongoDB → Redis → sweeper, shuts down cleanly on SIGTERM, and mounts routes under `/api/v1`; backend dependencies added |
 | `549917d` | **Resource and org-unit services**, built by a 7-agent workflow (see §8): listing, search, detail, availability, the eligibility checklist, manager create/edit/status, the org-unit catalogue, manager assignment |
+| `9294dac` | **Badge service** (B-09): catalogue, create, `/badges/mine`, request with evidence, the manager queue, approve/reject, direct grant, with tests for the judges' golden path and for races. A mutation check broke 23 guards on purpose, and a test failed for every one |
+| _uncommitted_ | **Incident service** (B-16): report, list, detail, comments, resolve; resolving the last open incident of a flagged booking closes it. Mutation check: 30 guards broken on purpose, 29 caught. The survivor only drops a projection that keeps comment text out of list reads, which nothing can observe |
 
 ---
 
@@ -53,14 +55,14 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-06 | Zod validation + error envelope | ❌ Teammate. No `validate()` and no error handler yet |
 | B-07 | OrgUnits + resource CRUD | ✅ Service done (`orgUnitService`, `resourceService`) |
 | B-08 | Search, filters + Redis cache | ✅ Service done |
-| B-09 | Badges | ❌ **Next stage** (models exist) |
+| B-09 | Badges | ✅ Service done (`badgeService`) |
 | B-10 | Explainable eligibility + `/bookings/check` | ✅ Engine + `checkBooking` |
 | B-11 | Booking state machine | ✅ |
 | B-12 | Double-booking prevention | ✅ (fails closed with 503 if Redis is down) |
 | B-13 | Fair-usage caps | ✅ |
 | B-14 | FIFO waitlist + promotion | ✅ |
 | B-15 | Condition reports | ✅ Service done |
-| B-16 | Incidents + human resolution | 🟡 Incidents are created (return issue, overdue); the incident service (comments, resolve → `closeFlagged`) isn't built |
+| B-16 | Incidents + human resolution | ✅ Service done (`incidentService`) |
 | B-17 | Cron sweeper | ✅ Wired into `server.js` |
 | B-18 | Notifications | 🟡 In-app done; email waits for a mailer; no list/read endpoints yet |
 | B-19 | Audit log + timeline | ✅ Service done; audit query endpoint pending |
@@ -85,7 +87,9 @@ The running record of what's built, what was decided and what's left. Read this 
 | `services/bookingContext.js`, `bookingTransitions.js`, `bookingViews.js`, `waitlistService.js` | Engine inputs; apply + audit + notify; conflict groups and timeline text; promotion |
 | `services/resourceService.js` | `listResources`, `getResource`, `getAvailability`, `getEligibility`, `createResource`, `updateResource`, `setResourceStatus`, `listResourceBookings` |
 | `services/orgUnitService.js` | `listOrgUnits`, `createOrgUnit`, `updateOrgUnit`, `setOrgUnitManagers` |
-| `services/access.js` | `isAdmin`, `managesUnit`, `requireAdmin`, `requireUnitManager` |
+| `services/incidentService.js` | `createIncident`, `listIncidents`, `getIncident`, `addComment`, `resolveIncident` |
+| `services/badgeService.js` | `listBadges`, `createBadge`, `listMyBadges`, `requestBadge`, `listBadgeRequests`, `decideBadgeRequest`, `grantBadge`, `badgeState` |
+| `services/access.js` | `isAdmin`, `managesUnit`, `requireAdmin`, `requireUnitManager`, `auditRole` (moved here from `resourceService`) |
 | `services/auditService.js`, `notifyService.js`, `cacheService.js`, `aiQuotaService.js` | Cross-cutting services |
 | `jobs/sweeper.js` | `runSweep`, `startSweeper`, `stopSweeper` |
 | `server.js`, `routes/authRoutes.js`, `middleware/auth.js`, `utils/tokens.js` | **Teammate's files.** Only the startup wiring and the `/api/v1` mount in `server.js` were changed |
@@ -118,6 +122,30 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 - **Org units:** the unit's code can't change. A duplicate code is 400 `VALIDATION_ERROR`. Manager assignment re-syncs users on every call, so a half-finished change is repaired by calling it again.
 - **Unknown user id → 404 `NOT_FOUND`**, the same as the booking service. The auth teammate may prefer 401; that's open.
 
+**Badges**
+- **One row per user and badge.** A member can ask again after a rejection, a revocation or an expiry; the row goes back to `requested`, and the old decision is cleared from it (the audit log keeps it). Asking again while a request is open, or while the badge is still valid, is 409 `INVALID_TRANSITION`. A new `requestedAt` field drives the FIFO queue.
+- **"Expired" is never stored.** `badgeState()` works it out with the same test as the eligibility engine's `BADGES` rule.
+- **No self-review here either:** a manager can't decide on their own badge request or grant themselves a badge. An admin can, as with bookings.
+- **A direct grant** makes any row active and also **renews** a badge that is still valid. Granting a badge that never expires to someone who already holds it changes nothing and isn't audited. The member's own note is kept; the manager's note goes into the audit entry's `reason`.
+- **Requesting needs an approved ID card** (checked in the service; that is what "verified" means for the route). Suspension is left to the route middleware.
+- **Badges of an inactive unit** aren't listed and can't be requested (409).
+- **`selfServe` can't be set through `createBadge`** until the quiz (C-13) exists; the seed sets it directly.
+- **The catalogue cache stores issuer ids.** Names are joined from `cache:orgunits` when the list is read, so renaming a unit needs no badge invalidation.
+- **New notification `badge.requested`** goes to the issuing unit's managers (not the requester), linking to `/manage/badges`. Granted and rejected notices go to the member; the granted notice includes the expiry date with its year (`formatIstFullDate`).
+- **Concurrency:** request and decide are conditional on the row's `updatedAt` as read, so a grant that lands mid-request isn't undone, and a stale decision on a request the member replaced gets a 409. A direct grant is a single upsert.
+
+**Incidents**
+- **`createIncident` is included** (`POST /incidents`, B-16 "created by the member"), though the plan only listed list, detail, comments and resolve.
+- **Who reports:** the borrower, on an `approved`, `checked_in`, `checked_out`, `completed` or `flagged` booking, up to 7 days after it ends. The unit's managers (or an admin) with no time limit, and also without a booking. Reporting never changes the booking's status; only `confirm-return` with an issue flags it. Unknown fields (`source`, `status`, …) are refused.
+- **Who sees and comments:** the booking's borrower, the reporter, the unit's managers and admins. A member's list holds what they reported plus everything on their bookings, the sweeper's delay incidents included; a manager's adds their units'.
+- **`open` → `in_review`** on the first comment by a manager or admin. A resolved incident's thread is closed (409), and a thread holds at most 200 comments.
+- **Who resolves:** the unit's managers for low and medium severity, admins for any. Nobody but an admin resolves an incident on their own booking. `outcome` and `rationale` are both required.
+- **`strike`** needs a booking, and adds one to its borrower's `User.strikes`, which nothing acts on yet (C-09 only ever *suggests* a suspension).
+- **Closing:** resolving the **last** unresolved incident of a `flagged` booking runs `closeFlagged` as the system. A booking with two incidents stays flagged until both are resolved. If closing fails after the incident is resolved, resolving again answers 409 but closes the booking first.
+- **Notifications:** `incident.created`, `incident.commented` and `incident.resolved` go to everyone involved but the person acting: borrower and reporter (member links), the unit's managers, and admins when severity is high. `closeFlagged` no longer sends `booking.completed` ("Thank you!" read oddly after a strike); `incident.resolved` adds "The booking is now closed."
+- **Timeline:** `/bookings/:id/timeline` now has an `event: "resolved"` item with the outcome next to each incident's `opened` item.
+- **Audit actions:** `incident.created`, `incident.commented` (with the `open → in_review` change when it happens) and `incident.resolved` (rationale as `reason`, outcome and any new strike count in `meta`).
+
 ---
 
 ## 6. Gaps the teammates need to close (from the integration review)
@@ -137,7 +165,8 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 6. **Routes and controllers** for `/api/v1/resources`, `/org-units` and `/bookings`. Mount `generalLimiter` after auth, and the auth-tier limiters after validation.
 7. **Request-id middleware,** for the audit log and the envelope.
 8. **Admin user-role route:** writing `managedOrgUnits` directly must go through `setOrgUnitManagers`.
-9. **Seed script:** NIT JSR units, badges, sample resources and the demo users (`backend.md` §9).
+9. **Seed script:** NIT JSR units, badges, sample resources and the demo users (`backend.md` §9). Writes that bypass the services leave `cache:badges` and `cache:orgunits` stale for up to 10 minutes, so flush them after seeding.
+10. **Badge and incident validators:** the per-route rules are in `backend.md` §7 (`badges.*`, `badgeRequests.*`, `incidents.create`, `incidents.list`, `incidents.comment`, `incidents.resolve`).
 
 ---
 
@@ -194,17 +223,19 @@ The high-severity fixes:
 
 ## 10. Known loose ends
 
-- `client/package-lock.json` has an uncommitted change (78 `libc` lines removed) from someone's `npm install` during the resource work. It's not part of the backend work; commit it or discard it (`git checkout client/package-lock.json`).
 - Email notifications wait for the mailer (B-18).
 - No database transactions: a failed audit write after a booking insert leaves a booking without its first audit entry (the request returns 500).
 - Doc wording still open: 404 vs 401 for an unknown signed-in user.
+- **Badge evidence upload:** the controller must upload the file (`uploadService`, not built yet) before it calls `requestBadge`, so an upload for a request the service then refuses is left orphaned in Cloudinary. Either check first with a cheap read, or delete the asset on a refusal.
+- **Incident strikes aren't transactional either:** a failed strike increment after the incident is resolved leaves the strike uncounted, and a retry only answers 409.
+- **Incident photos** come from the upload service (not built), like badge evidence.
+- **Shared parameter helpers:** `resourceService`, `badgeService` and `incidentService` each carry their own copies of `requireUser`, `readPaging`, `readEnum` and friends. Worth pulling into one module before the controllers land.
+- **No badge revoke action yet.** The `revoked` status is supported everywhere it's read, but nothing sets it. It isn't in the route table either.
 
 ---
 
 ## 11. Next steps (resume here)
 
-1. **Badge service** (B-09): catalogue, `/badges/mine`, request with optional evidence, the manager queue, approve/reject, direct grant. It's the last backend piece the judges' demo needs (a student requests a badge, a manager grants it).
-2. **Incident service** (B-16): list, detail, comments, resolve. Resolving a booking's incident calls `transition(…, "closeFlagged", SYSTEM)`.
-3. **Notifications and audit read endpoints** (list, mark read, audit query).
-4. **Routes and controllers** for everything above, once the validators and auth middleware land.
-5. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
+1. **Notifications and audit read endpoints** (list, mark read, audit query).
+2. **Routes and controllers** for everything above, badges and incidents, once the validators and auth middleware land.
+3. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).

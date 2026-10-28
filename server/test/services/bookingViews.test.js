@@ -190,6 +190,10 @@ describe("notification templates", () => {
     type: "damage",
     severity: "high",
     status: "pending",
+    userName: "Ananya Rao",
+    badgeName: "3D Printing Basics",
+    authorName: "Meera Iyer",
+    outcome: "warning",
   };
 
   test("every event renders a title, a body and an in-app link for each audience", () => {

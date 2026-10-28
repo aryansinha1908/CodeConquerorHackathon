@@ -14,6 +14,8 @@ const userBadgeSchema = new Schema(
     evidence: { publicId: { type: String, trim: true } },
     // The member's note with the request.
     note: { type: String, trim: true, maxlength: 500 },
+    // When the open request was made; a new request after a rejection moves it. The queue is FIFO on it.
+    requestedAt: Date,
     decidedBy: ref("User"),
     decidedAt: Date,
     // Why the request was rejected or the badge revoked.
@@ -26,8 +28,8 @@ const userBadgeSchema = new Schema(
 
 // One row per user and badge: a new request after a rejection updates the existing row.
 userBadgeSchema.index({ user: 1, badge: 1 }, { unique: true });
-// Manager queue: requested badges issued by the manager's unit.
-userBadgeSchema.index({ badge: 1, status: 1 });
+// Manager queue: requested badges issued by the manager's unit, oldest request first.
+userBadgeSchema.index({ badge: 1, status: 1, requestedAt: 1 });
 
 const UserBadge = mongoose.model("UserBadge", userBadgeSchema);
 export default UserBadge;

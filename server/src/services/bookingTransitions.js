@@ -36,7 +36,8 @@ async function notificationData(booking, resource, extra) {
   };
 }
 
-// [recipients, event, audience] per action; confirmIssue is notified as incident.created instead.
+// [recipients, event, audience] per action. confirmIssue is notified as incident.created instead,
+// and closeFlagged as incident.resolved, which says the booking is closed.
 const NOTIFY = {
   approve: (b) => [[[b.borrower], "booking.approved"]],
   reject: (b) => [[[b.borrower], "booking.rejected"]],
@@ -55,7 +56,7 @@ const NOTIFY = {
   checkOut: (b, r) => [[managersOf(r), "booking.checked_out", "manager"]],
   confirmOk: (b) => [[[b.borrower], "booking.completed"]],
   confirmIssue: () => [],
-  closeFlagged: (b) => [[[b.borrower], "booking.completed"]],
+  closeFlagged: () => [],
 };
 
 export async function notifyBooking(sends, booking, resource, extra = {}) {

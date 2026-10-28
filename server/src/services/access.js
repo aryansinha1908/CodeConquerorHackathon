@@ -36,3 +36,13 @@ export function requireUnitManager(
   if (!managesUnit(user, orgUnitId)) throw forbidden(message);
   return user;
 }
+
+// The capacity for an audit entry, once the scope check has passed: the unit's own manager acts as
+// "manager", even when also an admin; anyone else who got past it is an admin.
+export const auditRole = (actor, orgUnitId) =>
+  managesUnit(
+    { ...actor, roles: (actor.roles ?? []).filter((r) => r !== "admin") },
+    orgUnitId,
+  )
+    ? "manager"
+    : "admin";

@@ -62,7 +62,17 @@ const dateTimeFormat = new Intl.DateTimeFormat("en-IN", {
   hourCycle: "h23",
 });
 
+const fullDateFormat = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
 export const formatIstDate = (date) => dateFormat.format(new Date(date)); // "5 Nov"
+// For dates that may be a year or more away, such as a badge's expiry.
+export const formatIstFullDate = (date) =>
+  fullDateFormat.format(new Date(date)); // "5 Nov 2027"
 export const formatIstDateTime = (date) =>
   dateTimeFormat.format(new Date(date)); // "5 Nov, 14:30"
 

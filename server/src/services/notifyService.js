@@ -11,6 +11,18 @@ const linkFor = (data, links) =>
 const bookingLink = (data) => `/bookings/${data.bookingId}`;
 const withReason = (text, reason) =>
   reason ? `${text}: ${reason}` : `${text}.`;
+const incidentLink = (data) =>
+  linkFor(data, {
+    member: `/incidents/${data.incidentId}`,
+    manager: `/manage/incidents/${data.incidentId}`,
+    admin: "/admin/incidents",
+  });
+export const OUTCOME_LABELS = {
+  no_action: "No action",
+  warning: "Warning",
+  repair_required: "Repair required",
+  strike: "Strike",
+};
 
 const TEMPLATES = {
   "booking.requested": (d) => ({
@@ -126,14 +138,42 @@ const TEMPLATES = {
           body: `${d.resourceTitle} was due back at the end of ${d.when}. Please return it and check out now.`,
           link: `/bookings/${d.bookingId}/check-out`,
         },
+  "badge.requested": (d) => ({
+    title: "New badge request",
+    body: `${d.userName} requested the ${d.badgeName} badge.`,
+    link: "/manage/badges",
+  }),
+  "badge.granted": (d) => ({
+    title: "Badge granted",
+    body: d.expiresOn
+      ? `You now hold ${d.badgeName}, valid until ${d.expiresOn}.`
+      : `You now hold ${d.badgeName}.`,
+    link: "/badges",
+  }),
+  "badge.rejected": (d) => ({
+    title: "Badge request not approved",
+    body: withReason(
+      `Your request for the ${d.badgeName} badge wasn't approved`,
+      d.reason,
+    ),
+    link: "/badges",
+  }),
   "incident.created": (d) => ({
     title: "Incident reported",
     body: `A ${d.severity}-severity ${d.type} incident was reported for ${d.resourceTitle}.`,
-    link: linkFor(d, {
-      member: `/incidents/${d.incidentId}`,
-      manager: `/manage/incidents/${d.incidentId}`,
-      admin: "/admin/incidents",
-    }),
+    link: incidentLink(d),
+  }),
+  "incident.commented": (d) => ({
+    title: "New comment on an incident",
+    body: `${d.authorName} commented on the ${d.type} incident for ${d.resourceTitle}.`,
+    link: incidentLink(d),
+  }),
+  "incident.resolved": (d) => ({
+    title: "Incident resolved",
+    body:
+      `The ${d.type} incident for ${d.resourceTitle} was resolved. Outcome: ${OUTCOME_LABELS[d.outcome] ?? "recorded"}.` +
+      (d.bookingClosed ? " The booking is now closed." : ""),
+    link: incidentLink(d),
   }),
 };
 
