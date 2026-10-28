@@ -291,7 +291,7 @@ aiSummary  { text, generatedAt }      # C-14, suggestion only
 ```
 user, type (e.g. booking.approved), title, body, link, readAt | null
 ```
-TTL index of 60 days on `createdAt`.
+Indexes: `{ user: 1, createdAt: -1 }` for the feed, `{ user: 1, readAt: 1 }` for the polled unread count, and a TTL of 60 days on `createdAt`.
 
 ### AuditLog
 ```

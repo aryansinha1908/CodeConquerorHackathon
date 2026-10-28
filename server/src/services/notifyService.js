@@ -2,8 +2,17 @@
 // Email for the events marked in §8.2 is added with the mailer (B-18).
 //
 // send() never throws: a lost notification is logged, but must not undo the booking change behind it.
+// The reading half (the notification centre and the header bell) is at the end.
 import { log } from "../lib/log.js";
+import { notFound } from "../lib/serviceError.js";
 import { Notification } from "../models/index.js";
+import {
+  assertValid,
+  isId,
+  readFlag,
+  readPaging,
+  requireUser,
+} from "./params.js";
 
 // data.audience picks the link: "member" pages vs "manager" (/manage) and "admin" (/admin) pages.
 const linkFor = (data, links) =>
@@ -201,4 +210,72 @@ export async function send(userIds, event, data = {}) {
     );
     return [];
   }
+}
+
+// ── Reading ─────────────────────────────────────────────────────────────────
+// Each user sees only their own. Reads aren't audited: nothing about the record changes.
+
+const READ_FIELDS = { user: 0, __v: 0 };
+
+// GET /notifications. query: { unread, page, limit } → { items, meta: { page, limit, total, unread } },
+// newest first. unread=true (literally true) keeps only unread ones; meta.unread is the bell's count
+// either way, so the centre can update the bell without a second request.
+export async function listNotifications(userId, query = {}) {
+  const user = await requireUser(userId);
+  const problems = [];
+  const unreadOnly = readFlag(query.unread, "unread", problems);
+  const { page, limit } = readPaging(query, problems);
+  assertValid(problems);
+
+  const mine = { user: user._id };
+  const unreadFilter = { ...mine, readAt: null };
+  const filter = unreadOnly ? unreadFilter : mine;
+  const [items, total, unread] = await Promise.all([
+    Notification.find(filter, READ_FIELDS)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Notification.countDocuments(filter),
+    unreadOnly ? null : Notification.countDocuments(unreadFilter),
+  ]);
+  return { items, meta: { page, limit, total, unread: unread ?? total } };
+}
+
+// GET /notifications/unread-count → { count }. Every open tab polls it every 30 s (frontend.md
+// F-16), so it is one indexed count with no user lookup: an id with no user simply has none.
+export async function unreadCount(userId) {
+  if (!isId(userId)) throw notFound("User");
+  return {
+    count: await Notification.countDocuments({ user: userId, readAt: null }),
+  };
+}
+
+// PATCH /notifications/:id/read → the notification. Someone else's is 404, the same as one that
+// doesn't exist. Marking a read one again keeps its first readAt.
+export async function markRead(
+  userId,
+  notificationId,
+  { now = new Date() } = {},
+) {
+  const user = await requireUser(userId);
+  if (!isId(notificationId)) throw notFound("Notification");
+  const mine = { _id: notificationId, user: user._id };
+  await Notification.updateOne(
+    { ...mine, readAt: null },
+    { $set: { readAt: now } },
+  );
+  const notification = await Notification.findOne(mine, READ_FIELDS).lean();
+  if (!notification) throw notFound("Notification");
+  return notification;
+}
+
+// PATCH /notifications/read-all → { updated }: how many were unread.
+export async function markAllRead(userId, { now = new Date() } = {}) {
+  const user = await requireUser(userId);
+  const { modifiedCount } = await Notification.updateMany(
+    { user: user._id, readAt: null },
+    { $set: { readAt: now } },
+  );
+  return { updated: modifiedCount };
 }
