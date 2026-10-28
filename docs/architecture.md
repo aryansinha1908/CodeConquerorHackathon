@@ -254,7 +254,7 @@ stateDiagram-v2
 | `checked_in` → `checked_out`                        | Member                       | Condition report                                       | Audit; notify managers ("confirm return")                                                                        |
 | `checked_out` → `completed`                         | Manager                      | `outcome: ok`                                          | Audit; notify member                                                                                             |
 | `checked_out` → `flagged`                           | Manager                      | `outcome: issue` plus incident details                 | Incident created; audit; notify member and admins                                                                |
-| `flagged` → `completed`                             | Manager / Admin              | Incident resolved                                      | Audit; notify member                                                                                             |
+| `flagged` → `completed`                             | System                       | A manager or admin resolves the last open incident     | Audit (actor `system`); the member's `incident.resolved` notice says the booking is closed                     |
 
 **No self-review.** A manager can't approve, reject, waitlist or confirm the return of their own booking. Another manager of the unit, or an admin, must do it.
 
@@ -410,10 +410,16 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 | Method | Path                      | Auth                                          | Body / query                                                      | Rate tier | Cache |
 | ------ | ------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | --------- | ----- |
 | POST   | `/incidents`              | borrower of booking / manager\*               | `bookingId?, resourceId, type, severity, description, photos[]`   | `general` | —     |
-| GET    | `/incidents`              | member (own) / manager (unit) / admin         | `status, type, severity, resourceId, page`                        | `general` | —     |
+| GET    | `/incidents`              | member (own) / manager (unit) / admin         | `status` (one or a comma list), `type, severity, resourceId, page, limit` | `general` | —     |
 | GET    | `/incidents/:id`          | parties / manager\* / admin                   | —                                                                 | `general` | —     |
 | POST   | `/incidents/:id/comments` | parties / manager\* / admin                   | `text`                                                            | `general` | —     |
 | POST   | `/incidents/:id/resolve`  | manager\* (low/medium severity) / admin (any) | `outcome: no_action\|warning\|repair_required\|strike, rationale` | `general` | —     |
+
+- **Parties** are the booking's borrower and the reporter. A **member's own** incidents are those they reported and those on their bookings, including the sweeper's.
+- **Reporting:** the borrower can report on an `approved`, `checked_in`, `checked_out`, `completed` or `flagged` booking, up to 7 days after it ends. The unit's managers can report with no time limit, and also without a booking. Reporting never changes the booking's status: only `confirm-return` with an issue flags it.
+- **Status:** `open` → `in_review` on the first comment by a manager or admin → `resolved`. A resolved incident's thread is closed.
+- **Resolving:** nobody but an admin resolves an incident on their own booking. A `strike` needs a booking and adds one to its borrower's `strikes`.
+- **Closing the booking:** resolving the last unresolved incident of a `flagged` booking closes it (`closeFlagged`, by the system).
 
 **Notifications**
 
@@ -721,7 +727,7 @@ This is separate from application logs. App logs are for **engineers** and get r
   - `resource.created`, `resource.status_changed`
   - `badge.created`, `badge.requested`, `badge.granted`, `badge.rejected`
   - `booking.requested`, `booking.approved`, `booking.rejected`, `booking.waitlisted`, `booking.promoted`, `booking.cancelled`, `booking.checked_in`, `booking.checked_out`, `booking.completed`, `booking.flagged`, `booking.no_show`, `booking.overdue`
-  - `incident.created`, `incident.resolved`
+  - `incident.created`, `incident.commented`, `incident.resolved`
   - `user.suspended`
 - **Cool-to-have:** each entry stores `prevHash` and `hash = sha256(prevHash + canonicalJSON(entry))`, and `GET /audit/verify` proves nothing was altered.
 

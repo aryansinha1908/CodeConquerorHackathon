@@ -11,6 +11,18 @@ const linkFor = (data, links) =>
 const bookingLink = (data) => `/bookings/${data.bookingId}`;
 const withReason = (text, reason) =>
   reason ? `${text}: ${reason}` : `${text}.`;
+const incidentLink = (data) =>
+  linkFor(data, {
+    member: `/incidents/${data.incidentId}`,
+    manager: `/manage/incidents/${data.incidentId}`,
+    admin: "/admin/incidents",
+  });
+export const OUTCOME_LABELS = {
+  no_action: "No action",
+  warning: "Warning",
+  repair_required: "Repair required",
+  strike: "Strike",
+};
 
 const TEMPLATES = {
   "booking.requested": (d) => ({
@@ -149,11 +161,19 @@ const TEMPLATES = {
   "incident.created": (d) => ({
     title: "Incident reported",
     body: `A ${d.severity}-severity ${d.type} incident was reported for ${d.resourceTitle}.`,
-    link: linkFor(d, {
-      member: `/incidents/${d.incidentId}`,
-      manager: `/manage/incidents/${d.incidentId}`,
-      admin: "/admin/incidents",
-    }),
+    link: incidentLink(d),
+  }),
+  "incident.commented": (d) => ({
+    title: "New comment on an incident",
+    body: `${d.authorName} commented on the ${d.type} incident for ${d.resourceTitle}.`,
+    link: incidentLink(d),
+  }),
+  "incident.resolved": (d) => ({
+    title: "Incident resolved",
+    body:
+      `The ${d.type} incident for ${d.resourceTitle} was resolved. Outcome: ${OUTCOME_LABELS[d.outcome] ?? "recorded"}.` +
+      (d.bookingClosed ? " The booking is now closed." : ""),
+    link: incidentLink(d),
   }),
 };
 

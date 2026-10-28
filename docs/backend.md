@@ -281,8 +281,8 @@ source   enum user|manager|system
 type     enum damage|delay|misuse|safety|conflict|other
 severity enum low|medium|high
 description 20–2000, photos [{ url, publicId }]
-status   enum open|in_review|resolved
-comments [{ by, text ≤ 1000, at }]
+status   enum open|in_review|resolved     # in_review on the first manager or admin comment
+comments [{ by, text ≤ 1000, at }] (≤ 200; closed once resolved)
 resolution { outcome enum no_action|warning|repair_required|strike, rationale, decidedBy, at }
 aiSummary  { text, generatedAt }      # C-14, suggestion only
 ```
@@ -419,7 +419,9 @@ Every route has a Zod schema in `validators/`. The `validate` middleware parses 
 | `badgeRequests.list` | `status?` (a `USER_BADGE_STATUSES` value, default `requested`), `badgeId?: objectId`, plus pagination |
 | `badgeRequests.decide` | `decision: approve \| reject`, `reason: safeText(0,500)` (**required** to reject) |
 | `badges.grant` | `userId: objectId`, `note: safeText(0,500)` |
-| `incidents.create` | `type`, `severity` enums, `description: safeText(20,2000)`, `bookingId?`, `resourceId` |
+| `incidents.create` | `type`, `severity` enums, `description: safeText(20,2000)`, `bookingId?`, `resourceId` (required without `bookingId`; must match the booking's when both are sent), `photos[]` ≤ 3 `{url, publicId}` from our own Cloudinary folder |
+| `incidents.list` | `status?` (one or a comma list of `INCIDENT_STATUSES`), `type?`, `severity?`, `resourceId?: objectId`, plus pagination |
+| `incidents.comment` | `text: safeText(1,1000)` |
 | `incidents.resolve` | `outcome` enum, `rationale: safeText(10,1000)` |
 | `admin.verify` | `decision` enum, `reason: safeText(5,500)` (required when rejecting), `memberType`, `department` |
 | `admin.suspend` | `until: isoDate \| null` (must be in the future), `reason: safeText(10,500)` |
@@ -456,12 +458,13 @@ Each event always creates an in-app `Notification`. Email goes out only for the 
 | `booking.cancelled` | Other party | ✅ |
 | `booking.expired` | Borrower | ✅ |
 | `booking.checked_in` | Managers | — |
-| `booking.completed` | Borrower | — |
+| `booking.completed` | Borrower (not when an incident's resolution closes the booking: `incident.resolved` says so) | — |
 | `booking.reminder_start` / `reminder_end` | Borrower | ✅ |
 | `booking.no_show` | Borrower, managers | — |
 | `booking.overdue` | Borrower, managers | ✅ |
 | `booking.checked_out` | Managers ("confirm return") | — |
-| `incident.created` / `resolved` | Borrower, managers, admins (high severity) | ✅ |
+| `incident.created` / `resolved` | Borrower, reporter, managers, admins (high severity); never the person acting | ✅ |
+| `incident.commented` | Same as above | — |
 | `badge.requested` | Managers of the issuing unit (not the requester) | — |
 | `badge.granted` / `rejected` | User | — |
 

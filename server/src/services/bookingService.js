@@ -47,7 +47,7 @@ import {
   describeReport,
   groupConflicts,
 } from "./bookingViews.js";
-import { send } from "./notifyService.js";
+import { OUTCOME_LABELS, send } from "./notifyService.js";
 import { promoteFreedSlot, snapshot } from "./waitlistService.js";
 
 export { SYSTEM };
@@ -661,7 +661,7 @@ export async function getTimeline(bookingId, viewerId) {
       .lean(),
     Incident.find(
       { booking: booking._id },
-      { type: 1, severity: 1, status: 1, createdAt: 1 },
+      { type: 1, severity: 1, status: 1, createdAt: 1, resolution: 1 },
     ).lean(),
   ]);
   const unitCode = booking.orgUnit?.code;
@@ -686,14 +686,32 @@ export async function getTimeline(bookingId, viewerId) {
       by: r.submittedBy?.name ?? null,
       text: describeReport(r),
     })),
-    ...incidents.map((i) => ({
-      kind: "incident",
-      at: i.createdAt,
-      id: i._id,
-      type: i.type,
-      severity: i.severity,
-      status: i.status,
-      text: `Incident opened: ${i.severity}-severity ${i.type}`,
-    })),
+    ...incidents.flatMap((i) => {
+      const item = {
+        kind: "incident",
+        id: i._id,
+        type: i.type,
+        severity: i.severity,
+        status: i.status,
+      };
+      const opened = {
+        ...item,
+        event: "opened",
+        at: i.createdAt,
+        text: `Incident opened: ${i.severity}-severity ${i.type}`,
+      };
+      if (!i.resolution?.at) return [opened];
+      const { outcome } = i.resolution;
+      return [
+        opened,
+        {
+          ...item,
+          event: "resolved",
+          at: i.resolution.at,
+          outcome,
+          text: `Incident resolved. Outcome: ${OUTCOME_LABELS[outcome] ?? outcome}`,
+        },
+      ];
+    }),
   ].sort((a, b) => new Date(a.at) - new Date(b.at));
 }
