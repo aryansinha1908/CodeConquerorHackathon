@@ -55,3 +55,6 @@ junit.xml
 .stylelintcache
 *.tsbuildinfo
 .cache/
+
+# curl cookie jars from manual API testing (can hold live refresh tokens)
+cookies.txt
