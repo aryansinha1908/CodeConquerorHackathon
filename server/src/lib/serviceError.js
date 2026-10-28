@@ -21,6 +21,15 @@ export const forbidden = (message = "You're not allowed to do that.") =>
 export const invalid = (message, details) =>
   new ServiceError(400, "VALIDATION_ERROR", message, details);
 
+// One bad field, as a form marks it.
+export const fieldError = (path, message) =>
+  invalid("1 field is invalid.", [{ path, message }]);
+
+// The state changed underneath the request, or doesn't allow it (architecture.md §6 has no other
+// 409 code for this). The message says what to do: reload, or that it's already done.
+export const conflict = (message) =>
+  new ServiceError(409, "INVALID_TRANSITION", message);
+
 // Mongoose's own cast messages name the model and echo the raw value; a form field needs less.
 const CAST_MESSAGES = {
   number: "Must be a number.",

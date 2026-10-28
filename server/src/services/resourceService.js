@@ -13,7 +13,8 @@ import {
   SLOT_HOLDING_STATUSES,
 } from "../engines/stateMachine.js";
 import {
-  ServiceError,
+  conflict,
+  fieldError,
   forbidden,
   fromValidationError,
   invalid,
@@ -40,7 +41,7 @@ import {
   requireUnitManager,
 } from "./access.js";
 import { record } from "./auditService.js";
-import { loadResource, loadUser, memberContext } from "./bookingContext.js";
+import { loadResource, memberContext } from "./bookingContext.js";
 import { checkBooking } from "./bookingService.js";
 import {
   cachedResource,
@@ -48,10 +49,21 @@ import {
   canonicalJSON,
   invalidateResource,
 } from "./cacheService.js";
+import {
+  absent,
+  assertValid,
+  isId,
+  isPlainObject,
+  readEnum,
+  readEnumList,
+  readFlag,
+  readId,
+  readInstant,
+  readPaging,
+  readText,
+  requireUser,
+} from "./params.js";
 
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
-const MAX_PAGE = 10_000;
 const ELIGIBLE_CAP = 200;
 const MAX_RANGE_DAYS = 14;
 const MAX_QUERY_LENGTH = 100;
@@ -86,15 +98,6 @@ const CARD_FIELDS =
   "-__v -usageRules -checklist -availability.blackouts -createdBy";
 const DETAIL_FIELDS = "-__v -createdBy";
 
-// Mongoose 9 accepts only ObjectIds and 24-hex strings, so the mock auth's "demo-user-id-001" and
-// operator objects such as { $ne: null } are turned away before they reach a query.
-const isId = (value) => mongoose.isValidObjectId(value);
-
-const isPlainObject = (v) =>
-  v !== null &&
-  typeof v === "object" &&
-  [Object.prototype, null].includes(Object.getPrototypeOf(v));
-
 // What Redis hands back: ids and dates as strings. Loaders return the same, so a cache hit and a
 // miss look identical to callers.
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -127,12 +130,6 @@ async function loadDetail(resourceId) {
 const cachedDetail = (resourceId) =>
   cachedResource(String(resourceId), () => loadDetail(resourceId));
 
-async function requireUser(userId) {
-  const user = isId(userId) ? await loadUser(userId) : null;
-  if (!user) throw notFound("User");
-  return user;
-}
-
 // The unit's managers and admins may act on its resources. Anyone else gets 403, or 404 for an
 // archived resource, which stays hidden from them everywhere else too.
 function requireManaged(actor, resource, message) {
@@ -143,49 +140,6 @@ function requireManaged(actor, resource, message) {
 }
 
 // ── Parameter checks ────────────────────────────────────────────────────────
-// Routes validate with Zod first; these keep internal callers from turning a bad value into a
-// CastError (a 500) or an unbounded read, and report every problem at once.
-
-function assertValid(problems, noun = "parameter") {
-  const n = problems.length;
-  if (!n) return;
-  throw invalid(
-    n === 1 ? `1 ${noun} is invalid.` : `${n} ${noun}s are invalid.`,
-    problems,
-  );
-}
-
-const absent = (value) => value === undefined || value === null || value === "";
-
-function readEnum(value, allowed, path, problems) {
-  if (absent(value)) return undefined;
-  if (allowed.includes(value)) return value;
-  problems.push({ path, message: `Must be one of: ${allowed.join(", ")}.` });
-  return undefined;
-}
-
-// Lower-cased, so "6A1F…" matches the stored id in the unit scope check and the cache key.
-function readId(value, path, problems) {
-  if (absent(value)) return undefined;
-  if (isId(value)) return String(value).toLowerCase();
-  problems.push({ path, message: "Must be a valid id." });
-  return undefined;
-}
-
-function readInstant(value, path, problems, { required = false } = {}) {
-  if (absent(value)) {
-    if (required) problems.push({ path, message: "Required." });
-    return undefined;
-  }
-  const date = ["string", "number"].includes(typeof value)
-    ? new Date(value)
-    : value instanceof Date
-      ? new Date(value.getTime())
-      : new Date(NaN);
-  if (!Number.isNaN(date.getTime())) return date;
-  problems.push({ path, message: "Must be a valid date." });
-  return undefined;
-}
 
 // "2026-11-03" is a calendar day in IST. A Date (z.coerce.date() gives UTC midnight) counts as the
 // IST day it falls on. Only the weekday matters, so it is all that goes into the cache key.
@@ -201,62 +155,6 @@ function readWeekday(value, problems) {
   }
   problems.push({ path: "date", message: "Must be a date as YYYY-MM-DD." });
   return undefined;
-}
-
-// One status, or several at once for the manager's table (active and maintenance side by side), as a
-// list or "active,maintenance". → sorted and de-duplicated, so the cache key doesn't depend on order.
-function readStatuses(value, problems) {
-  if (absent(value)) return undefined;
-  const list = typeof value === "string" ? value.split(",") : value;
-  const statuses = Array.isArray(list)
-    ? [...new Set(list.map((s) => (typeof s === "string" ? s.trim() : s)))]
-    : [];
-  if (statuses.length && statuses.every((s) => RESOURCE_STATUSES.includes(s)))
-    return statuses.sort();
-  problems.push({
-    path: "status",
-    message: `Must be one or more of: ${RESOURCE_STATUSES.join(", ")}.`,
-  });
-  return undefined;
-}
-
-function readText(value, problems) {
-  if (absent(value)) return undefined;
-  if (typeof value !== "string") {
-    problems.push({ path: "q", message: "Must be text." });
-    return undefined;
-  }
-  const text = value.trim();
-  if (text.length > MAX_QUERY_LENGTH)
-    problems.push({
-      path: "q",
-      message: `Can be at most ${MAX_QUERY_LENGTH} characters.`,
-    });
-  return text || undefined;
-}
-
-function readFlag(value, path, problems) {
-  if (absent(value) || value === false || value === "false") return false;
-  if (value === true || value === "true") return true;
-  problems.push({ path, message: "Must be true or false." });
-  return false;
-}
-
-// limit is capped rather than refused, so an over-eager client still gets a page.
-function readPaging({ page, limit }, problems) {
-  const p = absent(page) ? 1 : Number(page);
-  const l = absent(limit) ? DEFAULT_LIMIT : Number(limit);
-  if (!Number.isInteger(p) || p < 1 || p > MAX_PAGE)
-    problems.push({
-      path: "page",
-      message: `Must be a whole number from 1 to ${MAX_PAGE}.`,
-    });
-  if (!Number.isInteger(l) || l < 1)
-    problems.push({
-      path: "limit",
-      message: "Must be a whole number above 0.",
-    });
-  return { page: p, limit: Math.min(l, MAX_LIMIT) };
 }
 
 // ── Browse ──────────────────────────────────────────────────────────────────
@@ -343,11 +241,16 @@ export async function listResources(
 ) {
   const viewer = await requireUser(viewerId);
   const problems = [];
-  const statuses = readStatuses(query.status, problems) ?? ["active"];
+  const statuses = readEnumList(
+    query.status,
+    RESOURCE_STATUSES,
+    "status",
+    problems,
+  ) ?? ["active"];
   const filters = {
     // A single status stays a string, so its filter and cache key are as before.
     status: statuses.length === 1 ? statuses[0] : statuses,
-    q: readText(query.q, problems),
+    q: readText(query.q, "q", problems, { max: MAX_QUERY_LENGTH }),
     category: readEnum(
       query.category,
       RESOURCE_CATEGORIES,
@@ -644,12 +547,10 @@ export async function createResource(actorId, input, { requestId } = {}) {
   const paths = formPaths(input, { creating: true });
   const unitId = paths.orgUnit;
   if (!isId(unitId)) {
-    throw invalid("1 field is invalid.", [
-      {
-        path: "orgUnit",
-        message: absent(unitId) ? "Required." : "Must be a valid id.",
-      },
-    ]);
+    throw fieldError(
+      "orgUnit",
+      absent(unitId) ? "Required." : "Must be a valid id.",
+    );
   }
   // Scope before existence, so a manager learns nothing about units they don't run.
   requireUnitManager(
@@ -659,12 +560,10 @@ export async function createResource(actorId, input, { requestId } = {}) {
   );
   const unit = await OrgUnit.findById(unitId, { isActive: 1 }).lean();
   if (!unit || unit.isActive === false) {
-    throw invalid("1 field is invalid.", [
-      {
-        path: "orgUnit",
-        message: unit ? "This unit is inactive." : "No such unit.",
-      },
-    ]);
+    throw fieldError(
+      "orgUnit",
+      unit ? "This unit is inactive." : "No such unit.",
+    );
   }
   await checkRefs(paths);
 
@@ -791,9 +690,7 @@ export async function setResourceStatus(
       { returnDocument: "after", projection: { _id: 1 } },
     ).lean();
     if (!updated) {
-      throw new ServiceError(
-        409,
-        "INVALID_TRANSITION",
+      throw conflict(
         "The status changed while you were saving. Reload and try again.",
       );
     }

@@ -14,7 +14,7 @@ import {
   relationsOf,
 } from "../engines/stateMachine.js";
 import { withLock } from "../lib/lock.js";
-import { RETURN_OUTCOMES } from "../models/enums.js";
+import { BOOKING_STATUSES, RETURN_OUTCOMES } from "../models/enums.js";
 import { keys } from "../lib/redisKeys.js";
 import {
   ServiceError,
@@ -33,7 +33,6 @@ import { record } from "./auditService.js";
 import {
   eligibilityContext,
   loadResource,
-  loadUser,
   slotUsage,
   waitlistPosition,
 } from "./bookingContext.js";
@@ -48,6 +47,14 @@ import {
   groupConflicts,
 } from "./bookingViews.js";
 import { OUTCOME_LABELS, send } from "./notifyService.js";
+import {
+  assertValid,
+  readEnum,
+  readId,
+  readInstant,
+  readPaging,
+  requireUser,
+} from "./params.js";
 import { promoteFreedSlot, snapshot } from "./waitlistService.js";
 
 export { SYSTEM };
@@ -61,12 +68,6 @@ const slotOf = ({ start, end }) => ({
   end: new Date(end),
 });
 const managersOf = (resource) => resource.orgUnit?.managers ?? [];
-
-async function requireUser(userId) {
-  const user = await loadUser(userId);
-  if (!user) throw notFound("User");
-  return user;
-}
 
 async function requireResource(resourceId) {
   const resource = await loadResource(resourceId);
@@ -570,9 +571,15 @@ export async function getBooking(
   };
 }
 
-// GET /bookings/mine
-export async function listMine(userId, { status, page = 1, limit = 20 } = {}) {
-  const filter = { borrower: userId, ...(status && { status }) };
+// GET /bookings/mine. query: { status, page, limit } → { items, meta }, latest start first.
+export async function listMine(userId, query = {}) {
+  const user = await requireUser(userId);
+  const problems = [];
+  const status = readEnum(query.status, BOOKING_STATUSES, "status", problems);
+  const { page, limit } = readPaging(query, problems);
+  assertValid(problems);
+
+  const filter = { borrower: user._id, ...(status && { status }) };
   const [items, total] = await Promise.all([
     Booking.find(filter)
       .sort({ start: -1 })
@@ -591,23 +598,27 @@ export async function listMine(userId, { status, page = 1, limit = 20 } = {}) {
 
 // GET /bookings/manage, limited to the manager's units (admins see all). status=pending returns
 // conflict groups: each pending request with the waitlisted requests competing for its slot.
-export async function listForManager(
-  managerId,
-  { status, resourceId, from, to, page = 1, limit = 20 } = {},
-) {
+// query: { status, resourceId, from, to, page, limit }, with from and to bounding the start as
+// [from, to).
+export async function listForManager(managerId, query = {}) {
   const manager = await requireUser(managerId);
   const isAdmin = manager.roles?.includes("admin");
   if (!isAdmin && !manager.roles?.includes("manager")) {
     throw forbidden("Only unit managers can see this queue.");
   }
+  const problems = [];
+  const status = readEnum(query.status, BOOKING_STATUSES, "status", problems);
+  const resourceId = readId(query.resourceId, "resourceId", problems);
+  const from = readInstant(query.from, "from", problems);
+  const to = readInstant(query.to, "to", problems);
+  const { page, limit } = readPaging(query, problems);
+  assertValid(problems);
+
   const filter = {
     ...(!isAdmin && { orgUnit: { $in: manager.managedOrgUnits ?? [] } }),
     ...(resourceId && { resource: resourceId }),
     ...((from || to) && {
-      start: {
-        ...(from && { $gte: new Date(from) }),
-        ...(to && { $lt: new Date(to) }),
-      },
+      start: { ...(from && { $gte: from }), ...(to && { $lt: to }) },
     }),
   };
   const withPeople = (query) =>
@@ -629,15 +640,15 @@ export async function listForManager(
     };
   }
 
-  const query = { ...filter, ...(status && { status }) };
+  const matching = { ...filter, ...(status && { status }) };
   const [items, total] = await Promise.all([
     withPeople(
-      Booking.find(query)
+      Booking.find(matching)
         .sort({ start: 1 })
         .skip((page - 1) * limit)
         .limit(limit),
     ),
-    Booking.countDocuments(query),
+    Booking.countDocuments(matching),
   ]);
   return { items, meta: { page, limit, total } };
 }

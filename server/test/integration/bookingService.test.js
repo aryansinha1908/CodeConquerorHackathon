@@ -708,6 +708,42 @@ describe("bookingService", { skip }, () => {
       );
     });
 
+    test("list queries are checked: bad values are 400, limit is capped, an unknown user is 404", async () => {
+      await book(f.student);
+      const capped = await listMine(f.student._id, { limit: 500 });
+      assert.equal(capped.meta.limit, 50);
+      assert.equal(
+        (await listMine(f.student._id, { status: "approved" })).meta.total,
+        0,
+      );
+
+      const mine = await failure(
+        listMine(f.student._id, { status: "booked", page: 0 }),
+      );
+      assert.equal(mine.code, "VALIDATION_ERROR");
+      assert.deepEqual(
+        mine.details.map((d) => d.path),
+        ["status", "page"],
+      );
+      const queue = await failure(
+        listForManager(f.manager._id, {
+          resourceId: "printer",
+          from: "soon",
+          to: { $gt: 0 },
+        }),
+      );
+      assert.deepEqual(
+        queue.details.map((d) => d.path),
+        ["resourceId", "from", "to"],
+      );
+      // The mock auth's id isn't an ObjectId: 404 like every other service, not a CastError.
+      for (const attempt of [
+        () => listMine("demo-user-id-001"),
+        () => listForManager("demo-user-id-001"),
+      ])
+        assert.equal((await failure(attempt())).code, "NOT_FOUND");
+    });
+
     test("the timeline tells the whole story in order", async () => {
       const { booking } = await book(f.student);
       await transition(

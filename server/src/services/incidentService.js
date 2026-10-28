@@ -15,7 +15,8 @@
 import mongoose from "mongoose";
 import { SYSTEM } from "../engines/stateMachine.js";
 import {
-  ServiceError,
+  conflict,
+  fieldError,
   forbidden,
   fromValidationError,
   invalid,
@@ -31,9 +32,22 @@ import {
 import { Booking, Incident, User } from "../models/index.js";
 import { auditRole, isAdmin, managesUnit } from "./access.js";
 import { record } from "./auditService.js";
-import { loadResource, loadUser } from "./bookingContext.js";
+import { loadResource } from "./bookingContext.js";
 import { transition } from "./bookingService.js";
 import { send } from "./notifyService.js";
+import {
+  absent,
+  assertValid,
+  isId,
+  isPlainObject,
+  readEnum,
+  readEnumList,
+  readId,
+  readPaging,
+  readText,
+  requireUser,
+  sameId,
+} from "./params.js";
 
 // Bookings an incident can be reported on: the borrower has, or is about to have, the resource.
 const REPORTABLE = [
@@ -60,95 +74,8 @@ const MAX_RATIONALE = 1000;
 const MAX_PHOTOS = 3;
 // A thread is a list inside the incident document, so it is capped.
 const MAX_COMMENTS = 200;
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
-const MAX_PAGE = 10_000;
-
-// Mongoose 9 accepts only ObjectIds and 24-hex strings, so the mock auth's "demo-user-id-001" and
-// operator objects such as { $ne: null } are turned away before they reach a query.
-const isId = (value) => mongoose.isValidObjectId(value);
-const sameId = (a, b) =>
-  a != null && b != null && String(a?._id ?? a) === String(b?._id ?? b);
-
-const isPlainObject = (v) =>
-  v !== null &&
-  typeof v === "object" &&
-  [Object.prototype, null].includes(Object.getPrototypeOf(v));
-
-const absent = (value) => value === undefined || value === null || value === "";
-
-const conflict = (message) =>
-  new ServiceError(409, "INVALID_TRANSITION", message);
-
-async function requireUser(userId) {
-  const user = isId(userId) ? await loadUser(userId) : null;
-  if (!user) throw notFound("User");
-  return user;
-}
 
 // ── Parameter checks ────────────────────────────────────────────────────────
-// Routes validate with Zod first; these keep internal callers from turning a bad value into a
-// CastError (a 500) or an unbounded read, and report every problem at once.
-
-function assertValid(problems, noun = "field") {
-  const n = problems.length;
-  if (!n) return;
-  throw invalid(
-    n === 1 ? `1 ${noun} is invalid.` : `${n} ${noun}s are invalid.`,
-    problems,
-  );
-}
-
-function readEnum(value, allowed, path, problems, { required } = {}) {
-  if (absent(value)) {
-    if (required) problems.push({ path, message: "Required." });
-    return undefined;
-  }
-  if (allowed.includes(value)) return value;
-  problems.push({ path, message: `Must be one of: ${allowed.join(", ")}.` });
-  return undefined;
-}
-
-function readId(value, path, problems) {
-  if (absent(value)) return undefined;
-  if (isId(value)) return String(value).toLowerCase();
-  problems.push({ path, message: "Must be a valid id." });
-  return undefined;
-}
-
-// Blank counts as absent. → the trimmed text, or undefined.
-function readText(value, path, problems, { required, min = 1, max }) {
-  if (!absent(value) && typeof value !== "string") {
-    problems.push({ path, message: "Must be text." });
-    return undefined;
-  }
-  const text = value?.trim();
-  if (!text) {
-    if (required) problems.push({ path, message: "Required." });
-    return undefined;
-  }
-  if (text.length < min)
-    problems.push({ path, message: `Must be at least ${min} characters.` });
-  else if (text.length > max)
-    problems.push({ path, message: `Can be at most ${max} characters.` });
-  return text;
-}
-
-// One status or several, as a list or "open,in_review" (the manager's unresolved view).
-function readStatuses(value, problems) {
-  if (absent(value)) return undefined;
-  const list = typeof value === "string" ? value.split(",") : value;
-  const statuses = Array.isArray(list)
-    ? [...new Set(list.map((s) => (typeof s === "string" ? s.trim() : s)))]
-    : [];
-  if (statuses.length && statuses.every((s) => INCIDENT_STATUSES.includes(s)))
-    return statuses;
-  problems.push({
-    path: "status",
-    message: `Must be one or more of: ${INCIDENT_STATUSES.join(", ")}.`,
-  });
-  return undefined;
-}
 
 // Mongoose stores null and non-object entries in a list of subdocuments as they are, so each photo
 // is checked here; that the URL is one of our own uploads is the validator's job (backend.md §7).
@@ -177,23 +104,6 @@ function readPhotos(value, problems) {
       });
   }
   return value;
-}
-
-// limit is capped rather than refused, so an over-eager client still gets a page.
-function readPaging({ page, limit }, problems) {
-  const p = absent(page) ? 1 : Number(page);
-  const l = absent(limit) ? DEFAULT_LIMIT : Number(limit);
-  if (!Number.isInteger(p) || p < 1 || p > MAX_PAGE)
-    problems.push({
-      path: "page",
-      message: `Must be a whole number from 1 to ${MAX_PAGE}.`,
-    });
-  if (!Number.isInteger(l) || l < 1)
-    problems.push({
-      path: "limit",
-      message: "Must be a whole number above 0.",
-    });
-  return { page: p, limit: Math.min(l, MAX_LIMIT) };
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -369,7 +279,7 @@ export async function createIncident(
     max: MAX_DESCRIPTION,
   });
   const photos = readPhotos(input.photos, problems);
-  assertValid(problems);
+  assertValid(problems, "field");
 
   const booking = bookingId
     ? await Booking.findById(bookingId, {
@@ -382,9 +292,7 @@ export async function createIncident(
     : null;
   if (bookingId && !booking) throw notFound("Booking");
   if (booking && resourceId && !sameId(booking.resource, resourceId))
-    throw invalid("1 field is invalid.", [
-      { path: "resourceId", message: "Isn't the booking's resource." },
-    ]);
+    throw fieldError("resourceId", "Isn't the booking's resource.");
   const resource = await loadResource(booking?.resource ?? resourceId);
   if (!resource) throw notFound("Resource");
   const orgUnit = booking?.orgUnit ?? resource.orgUnit?._id;
@@ -478,7 +386,12 @@ async function listScope(viewer) {
 export async function listIncidents(viewerId, query = {}) {
   const viewer = await requireUser(viewerId);
   const problems = [];
-  const status = readStatuses(query.status, problems);
+  const status = readEnumList(
+    query.status,
+    INCIDENT_STATUSES,
+    "status",
+    problems,
+  );
   const type = readEnum(query.type, INCIDENT_TYPES, "type", problems);
   const severity = readEnum(
     query.severity,
@@ -554,7 +467,7 @@ export async function addComment(
     required: true,
     max: MAX_COMMENT,
   });
-  assertValid(problems);
+  assertValid(problems, "field");
   if (incident.status === "resolved")
     throw conflict("This incident is resolved, so its thread is closed.");
 
@@ -680,7 +593,7 @@ export async function resolveIncident(
       message:
         "A strike counts against a borrower, and this incident isn't tied to a booking.",
     });
-  assertValid(problems);
+  assertValid(problems, "field");
 
   if (incident.status === "resolved") {
     // A retry after the booking failed to close: finish that, then say it was already resolved.
