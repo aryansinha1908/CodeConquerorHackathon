@@ -7,7 +7,7 @@ import { ErrorState } from '../../components/ui/ErrorState';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { resourceStatusView } from '../resources/format';
 import { useResource } from '../resources/api';
-import { ListingForm } from './resources/ListingForm';
+import { ListingForm } from './resources/ListingForm.jsx';
 import { canListResources, editorsText, unitName } from './resources/listingForm';
 import { textLinkClass } from './resources/styles';
 
