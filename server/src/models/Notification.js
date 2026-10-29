@@ -19,7 +19,8 @@ const notificationSchema = new Schema(
   { timestamps: true },
 );
 
-notificationSchema.index({ user: 1, createdAt: -1 }); // feed and unread count
+notificationSchema.index({ user: 1, createdAt: -1 }); // the feed
+notificationSchema.index({ user: 1, readAt: 1 }); // the unread count, polled every 30 s
 notificationSchema.index(
   { createdAt: 1 },
   { expireAfterSeconds: NOTIFICATION_TTL_DAYS * 24 * 60 * 60 },

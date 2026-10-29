@@ -1,183 +1,222 @@
-import React from 'react';
-import { Search, SlidersHorizontal, CheckSquare, Square, X, Filter } from 'lucide-react';
-import { Badge } from '../../../components/ui/Badge';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { Search, X } from 'lucide-react';
+import { Button } from '../../../components/ui/Button';
+import { Select } from '../../../components/ui/Select';
+import { cn } from '../../../lib/utils';
+import { errorMessage } from '../../../lib/errors';
+import { groupUnits } from '../../verification/api';
+import { SEARCH_MAX_LENGTH } from '../api';
+import { CATEGORY_OPTIONS } from '../format';
+
+// Explore's filters (frontend.md §6.2): search, category (the backend enum, readable labels), unit
+// (GET /org-units) and "only what I can book" (eligibleOnly=true). `filters` is read from the URL by
+// the page; every change goes to onChange(patch, { replace }). "All" is an empty value: the page
+// leaves that key out of the request.
+
+const SEARCH_DELAY_MS = 400;
+
+const pillClass = (active) =>
+  cn(
+    'px-3 py-2 min-h-[40px] text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 transition-all',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2',
+    active
+      ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
+      : 'bg-[#ede8df] text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
+  );
 
 export function ResourceFilters({
-  search,
-  onSearchChange,
-  category,
-  onCategoryChange,
-  dynamicCategories = [],
-  riskLevel,
-  onRiskLevelChange,
-  approvalMode,
-  onApprovalModeChange,
-  orgUnit,
-  onOrgUnitChange,
-  orgUnits = [],
-  onlyEligible,
-  onToggleEligible,
+  filters,
+  onChange,
   onReset,
+  units = [],
+  unitsLoading = false,
+  unitsError = null,
+  onRetryUnits,
+  hasFilters = false,
 }) {
+  const ids = useId();
+  const searchId = `${ids}-search`;
+  const eligibleId = `${ids}-eligible`;
+  const eligibleHintId = `${ids}-eligible-hint`;
+
+  // The search box types into local state and reaches the URL after a short pause (or at once on
+  // Enter). When the URL's q changes from elsewhere (reset, back button), the box follows it.
+  const [draft, setDraft] = useState(filters.q);
+  const [seenQ, setSeenQ] = useState(filters.q);
+  const [sentQ, setSentQ] = useState(filters.q);
+  if (filters.q !== seenQ) {
+    setSeenQ(filters.q);
+    if (filters.q !== sentQ) {
+      setDraft(filters.q);
+      setSentQ(filters.q);
+    }
+  }
+  // Typing waits for a pause before it reaches the URL (replacing the history entry, so Back
+  // doesn't step through every letter); Enter, Search and Clear apply at once.
+  const timerRef = useRef(null);
+  const searchRef = useRef(null);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const send = (value, options) => {
+    clearTimeout(timerRef.current);
+    setSentQ(value.trim());
+    onChange({ q: value }, options);
+  };
+  const type = (value) => {
+    setDraft(value);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => send(value, { replace: true }), SEARCH_DELAY_MS);
+  };
+  const applySearch = (value) => {
+    setDraft(value);
+    if (value.trim() === filters.q.trim()) {
+      clearTimeout(timerRef.current);
+      return;
+    }
+    send(value);
+  };
+  // The clear buttons go away once there is nothing to clear: each moves focus to the search box,
+  // so a keyboard user isn't dropped to <body> (frontend.md §10.3).
+  const clearSearch = () => {
+    applySearch('');
+    searchRef.current?.focus();
+  };
+  const reset = () => {
+    clearTimeout(timerRef.current);
+    onReset?.();
+    searchRef.current?.focus();
+  };
+
+  const groups = groupUnits(units);
+
   return (
-    <div className="bg-white border-2 border-[#1a1a1a] rounded-xl p-4 shadow-[4px_4px_0_#1a1a1a] space-y-4 font-mono">
-      {/* ── Search Input & OrgUnit Selector ── */}
-      <div className="flex flex-col md:flex-row gap-3 items-center">
-        <div className="relative flex-1 w-full">
-          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#1a1a1a]/50">
-            <Search className="w-4 h-4" />
+    <section
+      aria-label="Filters"
+      className="bg-white border-2 border-[#1a1a1a] rounded-xl p-4 shadow-[4px_4px_0_#1a1a1a] space-y-4 font-mono text-[#1a1a1a]"
+    >
+      <div className="flex flex-col md:flex-row gap-3 md:items-end">
+        <form
+          role="search"
+          className="flex-1 flex flex-col gap-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applySearch(draft);
+          }}
+        >
+          <label htmlFor={searchId} className="text-sm font-bold tracking-tight">
+            Search resources
+          </label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search
+                className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#1a1a1a]/60 pointer-events-none"
+                aria-hidden="true"
+              />
+              <input
+                ref={searchRef}
+                id={searchId}
+                type="search"
+                value={draft}
+                maxLength={SEARCH_MAX_LENGTH}
+                onChange={(event) => type(event.target.value)}
+                placeholder="3D printer, oscilloscope, lathe…"
+                className="w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border-2 border-[#1a1a1a] bg-white font-mono placeholder:text-[#1a1a1a]/60 focus:outline-none focus:ring-2 focus:ring-[#c0392b] focus:ring-offset-1 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {draft && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  aria-label="Clear the search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-[#ede8df] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            <Button type="submit" variant="outline" size="md" className="bg-white shrink-0">
+              Search
+            </Button>
           </div>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search equipment, 3D printers, GPU clusters, lab gear..."
-            className="w-full pl-10 pr-10 py-2.5 text-xs md:text-sm rounded-lg border-2 border-[#1a1a1a] bg-[#f5f0e8]/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#c0392b]"
-          />
-          {search && (
+        </form>
+
+        <div className="w-full md:w-72">
+          <Select
+            label="Unit"
+            value={filters.orgUnit}
+            onChange={(event) => onChange({ orgUnit: event.target.value })}
+            hint={unitsLoading ? 'Loading units…' : undefined}
+            error={unitsError ? `Couldn't load the units: ${errorMessage(unitsError)}` : undefined}
+          >
+            <option value="">All units</option>
+            {groups.map((group) => (
+              <optgroup key={group.type} label={group.label}>
+                {group.units.map((unit) => (
+                  <option key={unit._id} value={unit._id}>
+                    {unit.name}
+                    {unit.code ? ` (${unit.code.toUpperCase()})` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+          {unitsError && onRetryUnits && (
             <button
-              onClick={() => onSearchChange('')}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#1a1a1a]/50 hover:text-[#c0392b]"
+              type="button"
+              onClick={onRetryUnits}
+              className="mt-1 text-xs font-bold underline text-[#a93226] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] rounded-sm"
             >
-              <X className="w-4 h-4" />
+              Try loading the units again
             </button>
           )}
         </div>
-
-        {/* OrgUnit filter */}
-        <div className="w-full md:w-64">
-          <select
-            value={orgUnit}
-            onChange={(e) => onOrgUnitChange(e.target.value)}
-            className="w-full py-2.5 px-3 text-xs md:text-sm rounded-lg border-2 border-[#1a1a1a] bg-white font-mono focus:outline-none focus:ring-2 focus:ring-[#c0392b]"
-          >
-            <option value="all">All Campus Units</option>
-            {orgUnits.map((u) => (
-              <option key={u._id} value={u._id}>
-                {u.code ? `[${u.code}] ` : ''}
-                {u.name}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
-      {/* ── Dynamic Category Pills (computed from searched sample space) ── */}
-      <div className="space-y-2 pt-1 border-t border-[#1a1a1a]/15">
-        <div className="flex items-center justify-between text-[11px] font-bold text-[#1a1a1a]/70">
-          <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Filter className="w-3.5 h-3.5 text-[#183d2d]" />
-            Dynamic Categories ({dynamicCategories.length})
-          </span>
-          {search && (
-            <span className="text-[10px] text-[#c0392b]">
-              Filtered for &ldquo;{search}&rdquo;
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          {dynamicCategories.map((cat) => {
-            const active = category === cat.value;
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-[#1a1a1a]/15">
+        <div role="group" aria-label="Category" className="flex flex-wrap items-center gap-1.5">
+          <button type="button" aria-pressed={!filters.category} onClick={() => onChange({ category: '' })} className={pillClass(!filters.category)}>
+            All categories
+          </button>
+          {CATEGORY_OPTIONS.map((option) => {
+            const active = filters.category === option.value;
             return (
               <button
-                key={cat.value}
-                onClick={() => onCategoryChange(cat.value)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold font-mono tracking-wider rounded-md border-2 transition-all ${
-                  active
-                    ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
-                    : 'bg-[#ede8df] text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
-                }`}
+                key={option.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onChange({ category: active ? '' : option.value })}
+                className={pillClass(active)}
               >
-                <span>{cat.label}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                    active
-                      ? 'bg-white text-[#183d2d]'
-                      : 'bg-[#1a1a1a]/15 text-[#1a1a1a]'
-                  }`}
-                >
-                  {cat.count}
-                </span>
+                {option.label}
               </button>
             );
           })}
         </div>
-      </div>
 
-      {/* ── Secondary Attribute Filters (Risk, Approval, Eligibility) ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#1a1a1a]/15 text-xs">
-        {/* Risk Level Filter */}
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-[#1a1a1a]/70 text-[11px] uppercase">
-            Risk Filter:
-          </span>
-          <div className="flex items-center gap-1">
-            {[
-              { value: 'all', label: 'All' },
-              { value: 'low', label: 'Low' },
-              { value: 'medium', label: 'Med' },
-              { value: 'high', label: 'High' },
-            ].map((r) => (
-              <button
-                key={r.value}
-                onClick={() => onRiskLevelChange(r.value)}
-                className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors ${
-                  riskLevel === r.value
-                    ? 'bg-[#c0392b] text-white border-[#1a1a1a]'
-                    : 'bg-[#f5f0e8] text-[#1a1a1a] border-[#1a1a1a]/30 hover:border-[#1a1a1a]'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-start gap-2">
+            <input
+              id={eligibleId}
+              type="checkbox"
+              checked={filters.eligibleOnly}
+              onChange={(event) => onChange({ eligibleOnly: event.target.checked })}
+              aria-describedby={eligibleHintId}
+              className="mt-0.5 w-5 h-5 accent-[#183d2d] border-2 border-[#1a1a1a] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2"
+            />
+            <div>
+              <label htmlFor={eligibleId} className="text-xs font-bold cursor-pointer select-none">
+                Only show what I can book
+              </label>
+              <p id={eligibleHintId} className="text-[11px] text-[#1a1a1a]/75">
+                The checks of each resource's checklist that don't need a time.
+              </p>
+            </div>
           </div>
+          {hasFilters && (
+            <Button type="button" variant="ghost" size="sm" className="min-h-[40px] underline" onClick={reset}>
+              Clear filters
+            </Button>
+          )}
         </div>
-
-        {/* Approval Mode Filter */}
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-[#1a1a1a]/70 text-[11px] uppercase">
-            Approval:
-          </span>
-          <div className="flex items-center gap-1">
-            {[
-              { value: 'all', label: 'All' },
-              { value: 'auto', label: '⚡ Instant' },
-              { value: 'manual', label: 'Review' },
-            ].map((a) => (
-              <button
-                key={a.value}
-                onClick={() => onApprovalModeChange(a.value)}
-                className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors ${
-                  approvalMode === a.value
-                    ? 'bg-[#183d2d] text-white border-[#1a1a1a]'
-                    : 'bg-[#f5f0e8] text-[#1a1a1a] border-[#1a1a1a]/30 hover:border-[#1a1a1a]'
-                }`}
-              >
-                {a.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Checkbox: Only show eligible */}
-        <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold font-mono text-[#1a1a1a]">
-          <input
-            type="checkbox"
-            checked={onlyEligible}
-            onChange={(e) => onToggleEligible(e.target.checked)}
-            className="hidden"
-          />
-          <div
-            className={`w-4 h-4 rounded border-2 border-[#1a1a1a] flex items-center justify-center transition-colors ${
-              onlyEligible ? 'bg-[#183d2d] text-white' : 'bg-white'
-            }`}
-          >
-            {onlyEligible && <span className="text-[10px] leading-none">✓</span>}
-          </div>
-          <span>Only what I can book</span>
-        </label>
       </div>
-    </div>
+    </section>
   );
 }

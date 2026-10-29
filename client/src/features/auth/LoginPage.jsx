@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, LogIn, Mail, Lock, Timer, Zap } from 'lucide-react';
+import { Eye, EyeOff, LogIn, Mail, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '../../components/ui/Button';
@@ -12,28 +12,43 @@ import { AuthLayout } from './AuthLayout';
 import { DemoRoleSwitcher } from './DemoRoleSwitcher';
 import { login as apiLogin, getDemoConfig } from './api';
 import { useAuthStore } from '../../stores/auth';
-import { campusEmail } from '../../lib/schemas/auth';
 import { formatCountdown } from '../../lib/utils';
 
+// Only the format is checked here: the allowed domains are server config (ALLOWED_EMAIL_DOMAINS),
+// demo accounts (@demo.campuscommons.test) may log in under DEMO_MODE, and any other address just
+// gets INVALID_CREDENTIALS.
 const schema = z.object({
-  email: campusEmail,
+  email: z.string().trim().toLowerCase().min(1, 'Email is required').email('Enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
 });
+
+const FIELDS = ['email', 'password'];
+const DEFAULT_NEXT = '/explore';
+const AUTH_PAGES = ['/login', '/register', '/verify-otp'];
+
+// ?next= comes from the URL, so only same-site paths are followed.
+function safeNext(value) {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
+    return DEFAULT_NEXT;
+  }
+  const path = value.split(/[?#]/)[0];
+  return AUTH_PAGES.includes(path) ? DEFAULT_NEXT : value;
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const next = searchParams.get('next') ?? '/explore';
+  const next = safeNext(searchParams.get('next'));
 
-  const { setSession } = useAuthStore();
+  const setSession = useAuthStore((s) => s.setSession);
   const [showPwd, setShowPwd] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Lockout countdown (respects Retry-After)
+  // Lockout countdown after a 429 (error.retryAfter: details.retryAfterSeconds or Retry-After)
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [lockoutMsg, setLockoutMsg] = useState('');
 
-  // Demo mode
+  // Demo mode: GET /auth/demo-config → { demoMode, roles }
   const [demoConfig, setDemoConfig] = useState(null);
 
   const {
@@ -55,81 +70,51 @@ export default function LoginPage() {
 
   // ── Lockout countdown ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (lockoutSeconds <= 0) return;
-    const timer = setInterval(() => {
-      setLockoutSeconds((s) => {
-        if (s <= 1) {
-          clearInterval(timer);
-          setLockoutMsg('');
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
+    if (lockoutSeconds <= 0) return undefined;
+    const timer = setTimeout(() => setLockoutSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(timer);
   }, [lockoutSeconds]);
 
+  // ── Session (login or demo login) ────────────────────────────────────────────
+  const startSession = (accessToken, user) => {
+    setSession(accessToken, user);
+    navigate(next, { replace: true });
+  };
+
   // ── Submit ────────────────────────────────────────────────────────────────────
-  // const onSubmit = async (data) => {
-  //   if (lockoutSeconds > 0) return;
-  //   setIsSubmitting(true);
-  //   try {
-  //     const res = await apiLogin(data);
-  //     const { accessToken } = res.data;
-  //     setSession(accessToken);
-  //     toast.success('Welcome back!');
-  //     navigate(next, { replace: true });
-  //   } catch (err) {
-  //     if (err.code === 'VALIDATION_ERROR' && Array.isArray(err.details)) {
-  //       err.details.forEach((d) => setError(d.path, { message: d.message }));
-  //     } else if (err.code === 'INVALID_CREDENTIALS') {
-  //       setError('password', { message: 'Email or password is incorrect.' });
-  //     } else if (err.code === 'EMAIL_NOT_VERIFIED') {
-  //       toast.info('Please verify your email first.', {
-  //         action: {
-  //           label: 'Resend OTP',
-  //           onClick: () => navigate('/verify-otp', { state: { email: data.email } }),
-  //         },
-  //       });
-  //     } else if (err.code === 'RATE_LIMITED' || err.status === 429) {
-  //       const retryAfter = err.retryAfter ?? 60;
-  //       setLockoutSeconds(retryAfter);
-  //       setLockoutMsg(
-  //         `Too many failed attempts. Try again in ${formatCountdown(retryAfter)}.`
-  //       );
-  //     } else {
-  //       toast.error(err.message ?? 'Login failed', {
-  //         description: err.requestId ? `ref: ${err.requestId}` : undefined,
-  //       });
-  //     }
-  //   } finally {
-  //     setIsSubmitting(false);
-  //   }
-  // };
-
   const onSubmit = async (data) => {
-  if (lockoutSeconds > 0) return;
-
-  setIsSubmitting(true);
-
-  try {
-    // Temporary hackathon login bypass
-    if (data.email.toLowerCase().endsWith('@nitjsr.ac.in')) {
-      // If your app requires a token, use a clearly marked demo token.
-      const demoToken = 'hackathon-demo-token';
-
-      setSession(demoToken);
-
+    if (lockoutSeconds > 0) return;
+    setIsSubmitting(true);
+    try {
+      const res = await apiLogin(data);
+      const { accessToken, user } = res.data;
       toast.success('Welcome back!');
-      navigate(next, { replace: true });
-      return;
+      startSession(accessToken, user);
+    } catch (err) {
+      const fieldErrors =
+        err.code === 'VALIDATION_ERROR' && Array.isArray(err.details)
+          ? err.details.filter((d) => FIELDS.includes(d.path))
+          : [];
+      if (fieldErrors.length) {
+        fieldErrors.forEach((d) => setError(d.path, { message: d.message }));
+      } else if (err.code === 'INVALID_CREDENTIALS') {
+        setError('password', { message: err.message || 'Email or password is incorrect.' });
+      } else if (err.code === 'EMAIL_NOT_VERIFIED') {
+        // The server has just sent a fresh code to this address.
+        toast.info(err.message || 'Please verify your email first. We sent you a new code.');
+        navigate('/verify-otp', { state: { email: data.email } });
+      } else if (err.code === 'RATE_LIMITED' || err.status === 429) {
+        setLockoutSeconds(err.retryAfter ?? 60);
+        setLockoutMsg(err.message || 'Too many failed attempts.');
+      } else {
+        toast.error(err.message ?? 'Login failed', {
+          description: err.requestId ? `ref: ${err.requestId}` : undefined,
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    toast.error('Please use your NIT Jamshedpur email.');
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   const isLocked = lockoutSeconds > 0;
 
@@ -140,10 +125,7 @@ export default function LoginPage() {
     >
       {/* Demo role switcher — only shown when DEMO_MODE */}
       {demoConfig?.demoMode && (
-        <DemoRoleSwitcher roles={demoConfig.roles} onLogin={(token, user) => {
-          setSession(token, user);
-          navigate(next, { replace: true });
-        }} />
+        <DemoRoleSwitcher roles={demoConfig.roles} onLogin={startSession} />
       )}
 
       <form

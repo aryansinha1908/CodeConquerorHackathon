@@ -36,7 +36,8 @@ async function notificationData(booking, resource, extra) {
   };
 }
 
-// [recipients, event, audience] per action; confirmIssue is notified as incident.created instead.
+// [recipients, event, audience] per action. confirmIssue is notified as incident.created instead,
+// and closeFlagged as incident.resolved, which says the booking is closed.
 const NOTIFY = {
   approve: (b) => [[[b.borrower], "booking.approved"]],
   reject: (b) => [[[b.borrower], "booking.rejected"]],
@@ -55,7 +56,7 @@ const NOTIFY = {
   checkOut: (b, r) => [[managersOf(r), "booking.checked_out", "manager"]],
   confirmOk: (b) => [[[b.borrower], "booking.completed"]],
   confirmIssue: () => [],
-  closeFlagged: (b) => [[[b.borrower], "booking.completed"]],
+  closeFlagged: () => [],
 };
 
 export async function notifyBooking(sends, booking, resource, extra = {}) {
@@ -67,7 +68,9 @@ export async function notifyBooking(sends, booking, resource, extra = {}) {
 }
 
 // check: an ok result of canTransition(); set/push: extra fields written with the status change.
-// Throws 409 INVALID_TRANSITION if someone else changed the booking since it was read.
+// Throws 409 INVALID_TRANSITION if someone else changed the booking since it was read. The update
+// runs the model's validators (a reason over 500 characters is refused before anything is written),
+// since the audit entry and the notices come only after it.
 export async function applyTransition({
   booking,
   resource,
@@ -82,7 +85,7 @@ export async function applyTransition({
   const updated = await Booking.findOneAndUpdate(
     { _id: booking._id, status: check.from },
     { $set: { status: check.to, ...set }, ...(push && { $push: push }) },
-    { returnDocument: "after" },
+    { returnDocument: "after", runValidators: true },
   ).lean();
   if (!updated) {
     throw new ServiceError(

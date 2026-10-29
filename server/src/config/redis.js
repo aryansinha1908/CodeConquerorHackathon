@@ -68,7 +68,7 @@ export async function connectRedis({
   logger: appLogger,
   timeoutMs = 5000,
 } = {}) {
-  if (appLogger) setRedisLogger(appLogger);
+  if (appLogger) setLogger(appLogger);
   const redis = getRedis();
   if (redis.status === "ready") return true;
   try {

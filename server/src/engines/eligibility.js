@@ -457,9 +457,13 @@ export function evaluate(user, resource, slot, ctx = {}) {
 }
 
 // The status a new booking starts in, or the error POST /bookings returns (backend.md §6.1 "Outcome").
+// Only a boolean true joins the waitlist: the service turns the body's value into one with readFlag,
+// and anything else here ("false", 1, "no") must never quietly queue a member who didn't ask.
 export function requestStatus({ outcome }, { joinWaitlist = false } = {}) {
   if (outcome === "ineligible") return { error: "INELIGIBLE" };
   if (outcome === "slot_taken")
-    return joinWaitlist ? { status: "waitlisted" } : { error: "SLOT_TAKEN" };
+    return joinWaitlist === true
+      ? { status: "waitlisted" }
+      : { error: "SLOT_TAKEN" };
   return { status: outcome };
 }

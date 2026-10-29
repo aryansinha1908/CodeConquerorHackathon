@@ -1,519 +1,479 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import http from '../../lib/http';
-import { MOCK_RESOURCES } from '../resources/mockData';
-import { useAuthStore } from '../../stores/auth';
+import { retryReads } from '../../lib/errors';
+import { toDate } from '../../lib/time';
+import { toPhotoRefs } from '../uploads/api';
 
-const STORAGE_KEY = 'campuscommons_bookings_v1';
+// Bookings (api.md "Bookings"; frontend.md §6.2, §6.3, §8.2). One function per route. Each resolves
+// with { data, meta } from the success envelope (meta only on the paged lists) and rejects with
+// lib/http.js's normalised error { status, code, message, details, retryAfter, requestId }.
+// Nothing here falls back to made-up data, and no lifecycle action is applied optimistically: the
+// hooks wait for the server, then refetch what changed.
 
-function getStoredBookings() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    // fallback
-  }
+// ── Values ────────────────────────────────────────────────────────────────────
 
-  // Initial Seeded Golden Path Bookings
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
+export { BOOKING_STATUSES } from '../../lib/bookingStatus';
 
-  const formatISO = (d, h, m) => {
-    const copy = new Date(d);
-    copy.setHours(h, m, 0, 0);
-    return copy.toISOString();
+// GET /bookings/:id allowedActions, by state-machine name.
+export const BOOKING_ACTIONS = [
+  'approve',
+  'reject',
+  'waitlist',
+  'cancel',
+  'checkIn',
+  'checkOut',
+  'confirmOk',
+  'confirmIssue',
+];
+
+// My bookings tabs (frontend.md §6.2): Upcoming · Requests (with waitlist position) · Past.
+export const MINE_TABS = [
+  { id: 'upcoming', label: 'Upcoming', statuses: ['approved', 'checked_in'] },
+  { id: 'requests', label: 'Requests', statuses: ['pending', 'waitlisted'] },
+  {
+    id: 'past',
+    label: 'Past',
+    statuses: ['checked_out', 'completed', 'flagged', 'rejected', 'cancelled', 'expired', 'no_show'],
+  },
+];
+
+// Field limits from api.md, for counters and instant checks (the server checks them again).
+export const PURPOSE_MIN = 10;
+export const PURPOSE_MAX = 300;
+export const DECISION_TEXT_MAX = 500; // approve note, reject / waitlist / cancel reason
+export const ITEM_NOTE_MAX = 200; // a checklist item's note
+export const REPORT_NOTES_MAX = 1000; // check-in / check-out notes, the return note
+export const INCIDENT_DESCRIPTION_MIN = 20;
+export const INCIDENT_DESCRIPTION_MAX = 2000;
+export const CHECK_IN_OPENS_MINUTES = 15; // check-in opens 15 minutes before start, closes at end
+export const OVERDUE_GRACE_MINUTES = 15;
+
+export const CONDITION_OVERALL = [
+  { value: 'good', label: 'Good condition' },
+  { value: 'minor_issue', label: 'Minor issue' },
+  { value: 'damaged', label: 'Damaged' },
+];
+export const INCIDENT_TYPES = [
+  { value: 'damage', label: 'Damage' },
+  { value: 'delay', label: 'Late return' },
+  { value: 'misuse', label: 'Misuse' },
+  { value: 'safety', label: 'Safety' },
+  { value: 'conflict', label: 'Conflict' },
+  { value: 'other', label: 'Other' },
+];
+export const INCIDENT_SEVERITIES = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
+
+export const MINE_PAGE_SIZE = 20;
+export const MANAGE_PAGE_SIZE = 20;
+
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+/** A reference that may be populated ({ _id, … }) or a bare id → the id, or null. */
+export function idOf(ref) {
+  if (ref == null) return null;
+  if (typeof ref === 'object') return ref._id != null ? String(ref._id) : null;
+  return String(ref);
+}
+
+/** Whether GET /bookings/:id lets this viewer take `action` now (allowedActions). */
+export function canDo(booking, action) {
+  return Array.isArray(booking?.allowedActions) && booking.allowedActions.includes(action);
+}
+
+/** Whether `user` is the booking's borrower (a borrower may cancel without a reason). */
+export function isBorrower(booking, user) {
+  const borrower = idOf(booking?.borrower);
+  return Boolean(borrower && user?._id && borrower === String(user._id));
+}
+
+/** The instant check-in opens: 15 minutes before start. Null without a valid start. */
+export function checkInOpensAt(booking) {
+  const start = toDate(booking?.start);
+  return start ? new Date(start.getTime() - CHECK_IN_OPENS_MINUTES * 60 * 1000).toISOString() : null;
+}
+
+/**
+ * The newest condition report of a phase (check_in | check_out | return_confirmation) in timeline
+ * items, or null: the check-out step shows the check-in photos, the return check shows both.
+ */
+export function latestReport(items, phase) {
+  const reports = (Array.isArray(items) ? items : []).filter(
+    (item) => item?.kind === 'condition_report' && item.phase === phase
+  );
+  return reports.length ? reports[reports.length - 1] : null;
+}
+
+const text = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const toIso = (value) => {
+  const date = toDate(value);
+  return date ? date.toISOString() : value;
+};
+
+// 'approved,checked_in' from a list or a string; undefined when empty.
+function statusParam(status) {
+  const list = Array.isArray(status) ? status : typeof status === 'string' ? status.split(',') : [];
+  const clean = list.map((s) => String(s).trim()).filter(Boolean);
+  return clean.length ? clean.join(',') : undefined;
+}
+
+// Drop undefined, null and '' so they never reach the query string.
+function compact(params) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+}
+
+const unwrap = (res) => ({ data: res.data?.data, meta: res.data?.meta });
+const path = (id, suffix = '') => `/bookings/${encodeURIComponent(id)}${suffix}`;
+
+/**
+ * GET /bookings/mine params → the normalised { status, page, limit } used for both the request
+ * and the query key, so equal filters share one cache entry.
+ */
+export function mineParams({ status, page = 1, limit = MINE_PAGE_SIZE } = {}) {
+  return { status: statusParam(status) ?? null, page: Number(page) || 1, limit: Number(limit) || MINE_PAGE_SIZE };
+}
+
+/** GET /bookings/manage filters → the normalised object of the request and the query key. */
+export function manageParams({ status, resourceId, from, to, page = 1, limit = MANAGE_PAGE_SIZE } = {}) {
+  return compact({
+    status: text(status) || undefined,
+    resourceId: resourceId || undefined,
+    from: from ? toIso(from) : undefined,
+    to: to ? toIso(to) : undefined,
+    page: Number(page) || 1,
+    limit: Number(limit) || MANAGE_PAGE_SIZE,
+  });
+}
+
+/**
+ * A condition report from a form → the check-in / check-out body (api.md): items [{ label, ok,
+ * note? }] with notes trimmed and blank ones left out, overall, notes? and photos? ({ url, publicId }
+ * only). Empty optional fields are not sent.
+ */
+export function buildReportBody({ items, overall, notes, photos } = {}) {
+  const body = {
+    items: (Array.isArray(items) ? items : []).map((item) => {
+      const note = text(item?.note);
+      return { label: item?.label, ok: Boolean(item?.ok), ...(note && { note }) };
+    }),
+    overall,
   };
-
-  const initial = [
-    {
-      _id: 'book-001',
-      resource: MOCK_RESOURCES[0], // 3D Printer #2
-      user: {
-        _id: 'user-stu-1',
-        name: 'Aman Sharma',
-        email: '2024ugcs042@nitjsr.ac.in',
-        memberType: 'UG',
-        department: { code: 'CSE', name: 'Computer Science' },
-      },
-      start: formatISO(tomorrow, 10, 0),
-      end: formatISO(tomorrow, 12, 0),
-      purpose: 'Printing drone chassis frame for DIC Innovation Challenge 2026.',
-      status: 'pending',
-      waitlistPosition: null,
-      timeline: [
-        {
-          event: 'booking.created',
-          actor: 'Aman Sharma (Student)',
-          timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-          reason: 'Initial slot request submitted.',
-        },
-      ],
-      createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    },
-    {
-      _id: 'book-002',
-      resource: MOCK_RESOURCES[0], // 3D Printer #2 (Conflicting slot)
-      user: {
-        _id: 'user-stu-2',
-        name: 'Sneha Patel',
-        email: '2023ugme018@nitjsr.ac.in',
-        memberType: 'UG',
-        department: { code: 'ME', name: 'Mechanical Engineering' },
-      },
-      start: formatISO(tomorrow, 10, 0),
-      end: formatISO(tomorrow, 12, 0),
-      purpose: 'RoboWars mechanical gear housing prototyping.',
-      status: 'waitlisted',
-      waitlistPosition: 1,
-      timeline: [
-        {
-          event: 'booking.created',
-          actor: 'Sneha Patel (Student 2)',
-          timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-          reason: 'Slot held by earlier request; joined waitlist #1.',
-        },
-      ],
-      createdAt: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-    },
-    {
-      _id: 'book-003',
-      resource: MOCK_RESOURCES[1], // NVIDIA A100 GPU
-      user: {
-        _id: 'user-stu-1',
-        name: 'Aman Sharma',
-        email: '2024ugcs042@nitjsr.ac.in',
-        memberType: 'UG',
-        department: { code: 'CSE', name: 'Computer Science' },
-      },
-      start: formatISO(today, 14, 0),
-      end: formatISO(today, 18, 0),
-      purpose: 'BERT transformer attention head visualization fine-tuning run.',
-      status: 'approved',
-      waitlistPosition: null,
-      timeline: [
-        {
-          event: 'booking.created',
-          actor: 'Aman Sharma (Student)',
-          timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
-          reason: 'Automated policy approved for CSE lab tier.',
-        },
-        {
-          event: 'booking.approved',
-          actor: 'System Policy (Auto-Approve)',
-          timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
-          reason: 'Quota and badge prerequisites satisfied.',
-        },
-      ],
-      createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    },
-    {
-      _id: 'book-004',
-      resource: MOCK_RESOURCES[4], // Rigol Oscilloscope
-      user: {
-        _id: 'user-stu-1',
-        name: 'Aman Sharma',
-        email: '2024ugcs042@nitjsr.ac.in',
-        memberType: 'UG',
-        department: { code: 'CSE', name: 'Computer Science' },
-      },
-      start: formatISO(today, 9, 0),
-      end: formatISO(today, 13, 0),
-      purpose: 'ESP32 SPI bus signal integrity debug with logic analyzer.',
-      status: 'checked_in',
-      waitlistPosition: null,
-      conditionReports: {
-        checkIn: {
-          overall: 'good',
-          notes: 'Unit clean, BNC probes in good condition.',
-          checklist: ['Turn off solder station', 'Switch off DC bench supply', 'Coil probes'],
-          photos: ['/background.jpeg'],
-          submittedAt: new Date(Date.now() - 3600000 * 1.8).toISOString(),
-        },
-      },
-      timeline: [
-        {
-          event: 'booking.approved',
-          actor: 'System',
-          timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-          reason: 'Instant reservation granted.',
-        },
-        {
-          event: 'booking.checked_in',
-          actor: 'Aman Sharma (Student)',
-          timestamp: new Date(Date.now() - 3600000 * 1.8).toISOString(),
-          reason: 'Check-in checklist verified with photo.',
-        },
-      ],
-      createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-    },
-    {
-      _id: 'book-005',
-      resource: MOCK_RESOURCES[2], // Laser Cutter 60W
-      user: {
-        _id: 'user-stu-1',
-        name: 'Aman Sharma',
-        email: '2024ugcs042@nitjsr.ac.in',
-        memberType: 'UG',
-        department: { code: 'CSE', name: 'Computer Science' },
-      },
-      start: formatISO(new Date(Date.now() - 86400000 * 2), 11, 0),
-      end: formatISO(new Date(Date.now() - 86400000 * 2), 13, 0),
-      purpose: 'Acrylic laser cut enclosure panels for DIC lab prototype.',
-      status: 'completed',
-      waitlistPosition: null,
-      timeline: [
-        {
-          event: 'booking.approved',
-          actor: 'Dr. R. Singh (DIC Manager)',
-          timestamp: new Date(Date.now() - 86400000 * 2.5).toISOString(),
-          reason: 'Safety protocols and acrylic spec verified.',
-        },
-        {
-          event: 'booking.completed',
-          actor: 'Dr. R. Singh (DIC Manager)',
-          timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-          reason: 'Return confirmed. Honeycomb bed in pristine condition.',
-        },
-      ],
-      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    },
-  ];
-
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-  } catch (e) {
-    // ignore
-  }
-  return initial;
+  const cleanNotes = text(notes);
+  if (cleanNotes) body.notes = cleanNotes;
+  const refs = toPhotoRefs(photos);
+  if (refs.length) body.photos = refs;
+  return body;
 }
 
-function saveBookings(bookings) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
-  } catch (e) {
-    // ignore
-  }
-}
-
-/** POST /bookings/check — live pre-check */
-export async function checkBooking(data) {
-  try {
-    const res = await http.post('/bookings/check', data);
-    return res.data;
-  } catch (err) {
-    // Simulated live pre-check engine
-    const bookings = getStoredBookings();
-    const { resourceId, start, end } = data;
-    const s = new Date(start).getTime();
-    const e = new Date(end).getTime();
-
-    // Find conflicting bookings on this resource
-    const conflicting = bookings.filter((b) => {
-      if (b.resource._id !== resourceId && b.resource !== resourceId) return false;
-      if (['rejected', 'cancelled', 'expired', 'completed'].includes(b.status)) return false;
-      const bStart = new Date(b.start).getTime();
-      const bEnd = new Date(b.end).getTime();
-      return Math.max(s, bStart) < Math.min(e, bEnd);
-    });
-
-    if (conflicting.length > 0) {
-      return {
-        status: 'success',
-        data: {
-          available: false,
-          code: 'SLOT_TAKEN',
-          conflictCount: conflicting.length,
-          waitlistPosition: conflicting.length + 1,
-          message: `Slot held by an earlier request (${conflicting[0].user?.name || 'Another borrower'}).`,
-        },
-      };
-    }
-
-    return {
-      status: 'success',
-      data: {
-        available: true,
-        code: 'AVAILABLE',
-        conflictCount: 0,
-        waitlistPosition: null,
-        message: 'Slot is open. All eligibility rules satisfied.',
-      },
+/**
+ * The return check from a form → the confirm-return body: outcome, items? (the full checklist,
+ * only when answered), photos?, note? and, for an issue only, incident { type, severity,
+ * description }.
+ */
+export function buildReturnBody({ outcome, items, photos, note, incident } = {}) {
+  const body = { outcome };
+  const report = buildReportBody({ items, photos });
+  if (report.items.length) body.items = report.items;
+  if (report.photos) body.photos = report.photos;
+  const cleanNote = text(note);
+  if (cleanNote) body.note = cleanNote;
+  if (outcome === 'issue' && incident) {
+    body.incident = {
+      type: incident.type,
+      severity: incident.severity,
+      description: text(incident.description),
     };
   }
+  return body;
 }
 
-/** POST /bookings — create reservation request */
-export async function createBooking(data) {
-  try {
-    const res = await http.post('/bookings', data);
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const user = useAuthStore.getState().user || {
-      _id: 'user-curr',
-      name: 'Current User',
-      email: 'user@nitjsr.ac.in',
-      memberType: 'UG',
-      department: { code: 'CSE', name: 'Computer Science' },
-    };
+// ── Requests ──────────────────────────────────────────────────────────────────
 
-    const resource =
-      MOCK_RESOURCES.find((r) => r._id === data.resourceId) || MOCK_RESOURCES[0];
-
-    // Pre-check for conflict
-    const s = new Date(data.start).getTime();
-    const e = new Date(data.end).getTime();
-    const conflicting = bookings.filter((b) => {
-      if (b.resource._id !== resource._id) return false;
-      if (['rejected', 'cancelled', 'expired', 'completed'].includes(b.status)) return false;
-      const bStart = new Date(b.start).getTime();
-      const bEnd = new Date(b.end).getTime();
-      return Math.max(s, bStart) < Math.min(e, bEnd);
-    });
-
-    let newStatus = 'pending';
-    let waitlistPos = null;
-
-    if (conflicting.length > 0) {
-      newStatus = 'waitlisted';
-      waitlistPos = conflicting.length + 1;
-    } else if (resource.approvalMode === 'auto') {
-      newStatus = 'approved';
-    }
-
-    const newBooking = {
-      _id: `book-${Date.now().toString(36)}`,
-      resource,
-      user,
-      start: data.start,
-      end: data.end,
-      purpose: data.purpose,
-      status: newStatus,
-      waitlistPosition: waitlistPos,
-      timeline: [
-        {
-          event: newStatus === 'approved' ? 'booking.approved' : 'booking.created',
-          actor: `${user.name} (${user.memberType})`,
-          timestamp: new Date().toISOString(),
-          reason:
-            newStatus === 'waitlisted'
-              ? `Joined waitlist position #${waitlistPos}`
-              : newStatus === 'approved'
-              ? 'Instant auto-approval policy'
-              : 'Reservation request submitted for manager review.',
-        },
-      ],
-      createdAt: new Date().toISOString(),
-    };
-
-    bookings.unshift(newBooking);
-    saveBookings(bookings);
-
-    return {
-      status: 'success',
-      data: newBooking,
-      message:
-        newStatus === 'approved'
-          ? 'Slot approved instantly!'
-          : newStatus === 'waitlisted'
-          ? `You have joined the waitlist as #${waitlistPos}.`
-          : 'Booking request submitted for facility manager review.',
-    };
-  }
+/**
+ * POST /bookings/check { resourceId, start, end } → data { eligible, outcome, results: [12 rules],
+ * waitlistPosition }. Nothing is saved; a suspended or unverified user gets failed rules, not 403.
+ */
+export async function checkBooking({ resourceId, start, end }) {
+  const res = await http.post('/bookings/check', { resourceId, start: toIso(start), end: toIso(end) });
+  return unwrap(res);
 }
 
-/** GET /bookings/mine */
-export async function getMyBookings(params = {}) {
-  try {
-    const res = await http.get('/bookings/mine', { params });
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    return {
-      status: 'success',
-      data: bookings,
-    };
-  }
+/**
+ * POST /bookings { resourceId, start, end, purpose, joinWaitlist? } → 201 data { booking,
+ * evaluation, waitlistPosition }. joinWaitlist is sent only when true (offer it after 409
+ * SLOT_TAKEN). 422 INELIGIBLE carries the failed rules in details.
+ */
+export async function createBooking({ resourceId, start, end, purpose, joinWaitlist = false }) {
+  const res = await http.post('/bookings', {
+    resourceId,
+    start: toIso(start),
+    end: toIso(end),
+    purpose: text(purpose),
+    ...(joinWaitlist === true && { joinWaitlist: true }),
+  });
+  return unwrap(res);
 }
 
-/** GET /bookings/:id */
+/**
+ * GET /bookings/mine?status&page&limit → data [Booking with resource { _id, title, slug, location },
+ * waitlistPosition on waitlisted ones], meta { page, limit, total }. Latest start first. `status` is
+ * one status, a list or a comma list.
+ */
+export async function listMyBookings(params = {}) {
+  const { status, page, limit } = mineParams(params);
+  const res = await http.get('/bookings/mine', { params: compact({ status, page, limit }) });
+  return unwrap(res);
+}
+
+/**
+ * GET /bookings/manage?status&resourceId&from&to&page&limit (managers: their units; admins: all).
+ * Without status=pending: data [Booking with resource { _id, title, slug, quantity } and borrower
+ * { _id, name, memberType, department }], earliest start first. With status=pending: data [conflict
+ * group { resource, start, end, bookings: [Booking] }], oldest pending first; meta.total counts
+ * groups. `from`/`to` bound `start` as [from, to).
+ */
+export async function listManageBookings(filters = {}) {
+  const res = await http.get('/bookings/manage', { params: manageParams(filters) });
+  return unwrap(res);
+}
+
+/**
+ * GET /bookings/:id → data Booking with resource { _id, title, slug, location, bookingMode,
+ * checklist }, borrower, orgUnit { _id, name, code }, allowedActions, isOverdue, waitlistPosition.
+ */
 export async function getBooking(id) {
-  try {
-    const res = await http.get(`/bookings/${id}`);
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const found = bookings.find((b) => b._id === id);
-    if (found) return { status: 'success', data: found };
-    throw { status: 404, message: 'Booking not found' };
-  }
+  return unwrap(await http.get(path(id)));
 }
 
-/** POST /bookings/:id/cancel */
-export async function cancelBooking(id, reason) {
-  try {
-    const res = await http.post(`/bookings/${id}/cancel`, { reason });
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const item = bookings.find((b) => b._id === id);
-    if (item) {
-      item.status = 'cancelled';
-      item.timeline = item.timeline || [];
-      item.timeline.push({
-        event: 'booking.cancelled',
-        actor: 'User',
-        timestamp: new Date().toISOString(),
-        reason: reason || 'Cancelled by borrower.',
-      });
-      saveBookings(bookings);
-      return { status: 'success', data: item };
-    }
-    throw err;
-  }
+/** GET /bookings/:id/timeline → data [event | condition_report | incident], oldest first. */
+export async function getBookingTimeline(id) {
+  return unwrap(await http.get(path(id, '/timeline')));
 }
 
-/** POST /bookings/:id/check-in */
-export async function checkInBooking(id, payload) {
-  try {
-    const res = await http.post(`/bookings/${id}/check-in`, payload);
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const item = bookings.find((b) => b._id === id);
-    if (item) {
-      item.status = 'checked_in';
-      item.conditionReports = item.conditionReports || {};
-      item.conditionReports.checkIn = {
-        overall: payload.overall || 'good',
-        notes: payload.notes || 'Clean condition verified.',
-        checklist: payload.checklist || [],
-        photos: payload.photos || ['/background.jpeg'],
-        submittedAt: new Date().toISOString(),
-      };
-      item.timeline = item.timeline || [];
-      item.timeline.push({
-        event: 'booking.checked_in',
-        actor: 'Borrower',
-        timestamp: new Date().toISOString(),
-        reason: 'Check-in completed with condition photo and safety checklist.',
-      });
-      saveBookings(bookings);
-      return { status: 'success', data: item };
-    }
-    throw err;
-  }
+/** POST /bookings/:id/approve { note? (≤500) } → data Booking (approved). */
+export async function approveBooking(id, { note } = {}) {
+  const clean = text(note);
+  return unwrap(await http.post(path(id, '/approve'), clean ? { note: clean } : {}));
 }
 
-/** POST /bookings/:id/check-out */
-export async function checkOutBooking(id, payload) {
-  try {
-    const res = await http.post(`/bookings/${id}/check-out`, payload);
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const item = bookings.find((b) => b._id === id);
-    if (item) {
-      item.status = 'checked_out';
-      item.conditionReports = item.conditionReports || {};
-      item.conditionReports.checkOut = {
-        overall: payload.overall || 'good',
-        notes: payload.notes || 'Tool returned properly.',
-        checklist: payload.checklist || [],
-        photos: payload.photos || ['/background.jpeg'],
-        submittedAt: new Date().toISOString(),
-      };
-      item.timeline = item.timeline || [];
-      item.timeline.push({
-        event: 'booking.checked_out',
-        actor: 'Borrower',
-        timestamp: new Date().toISOString(),
-        reason: 'Check-out completed. Awaiting facility manager return confirmation.',
-      });
-      saveBookings(bookings);
-      return { status: 'success', data: item };
-    }
-    throw err;
-  }
+/** POST /bookings/:id/reject { reason (required, ≤500) } → data Booking (rejected). */
+export async function rejectBooking(id, { reason } = {}) {
+  return unwrap(await http.post(path(id, '/reject'), { reason: text(reason) }));
 }
 
-/** GET /bookings/manage — returns requests grouped by conflicting slot */
-export async function getManageBookings() {
-  try {
-    const res = await http.get('/bookings/manage');
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    // Group conflicting requests
-    const slotGroups = [];
-    const processed = new Set();
-
-    bookings.forEach((b) => {
-      if (processed.has(b._id)) return;
-      if (!['pending', 'waitlisted', 'approved'].includes(b.status)) return;
-
-      const group = [b];
-      processed.add(b._id);
-
-      const bStart = new Date(b.start).getTime();
-      const bEnd = new Date(b.end).getTime();
-
-      bookings.forEach((other) => {
-        if (processed.has(other._id)) return;
-        if (!['pending', 'waitlisted', 'approved'].includes(other.status)) return;
-        if (other.resource._id !== b.resource._id) return;
-
-        const oStart = new Date(other.start).getTime();
-        const oEnd = new Date(other.end).getTime();
-
-        if (Math.max(bStart, oStart) < Math.min(bEnd, oEnd)) {
-          group.push(other);
-          processed.add(other._id);
-        }
-      });
-
-      slotGroups.push({
-        slotKey: `${b.resource._id}-${b.start}`,
-        resource: b.resource,
-        start: b.start,
-        end: b.end,
-        requests: group,
-      });
-    });
-
-    return {
-      status: 'success',
-      data: slotGroups,
-    };
-  }
+/** POST /bookings/:id/waitlist { reason (required, ≤500) } → data Booking (waitlisted). */
+export async function waitlistBooking(id, { reason } = {}) {
+  return unwrap(await http.post(path(id, '/waitlist'), { reason: text(reason) }));
 }
 
-/** POST /bookings/:id/(approve|reject|waitlist) */
-export async function decideBooking(id, action, reason) {
-  try {
-    const res = await http.post(`/bookings/${id}/${action}`, { reason });
-    return res.data;
-  } catch (err) {
-    const bookings = getStoredBookings();
-    const item = bookings.find((b) => b._id === id);
-    if (!item) throw { status: 404, message: 'Booking not found' };
-
-    const actionToStatus = {
-      approve: 'approved',
-      reject: 'rejected',
-      waitlist: 'waitlisted',
-    };
-
-    item.status = actionToStatus[action] || action;
-    item.timeline = item.timeline || [];
-    item.timeline.push({
-      event: `booking.${item.status}`,
-      actor: 'Unit Manager',
-      timestamp: new Date().toISOString(),
-      reason: reason || `Decision: ${action}`,
-    });
-
-    saveBookings(bookings);
-    return { status: 'success', data: item };
-  }
+/**
+ * POST /bookings/:id/cancel { reason? (≤500) } → data Booking (cancelled). The borrower may leave
+ * the reason out; a manager or admin must give one.
+ */
+export async function cancelBooking(id, { reason } = {}) {
+  const clean = text(reason);
+  return unwrap(await http.post(path(id, '/cancel'), clean ? { reason: clean } : {}));
 }
 
+/** POST /bookings/:id/check-in { items, overall, notes?, photos? } → data Booking (checked_in). */
+export async function checkInBooking(id, report = {}) {
+  return unwrap(await http.post(path(id, '/check-in'), buildReportBody(report)));
+}
+
+/** POST /bookings/:id/check-out (same body as check-in) → data Booking (checked_out). */
+export async function checkOutBooking(id, report = {}) {
+  return unwrap(await http.post(path(id, '/check-out'), buildReportBody(report)));
+}
+
+/**
+ * POST /bookings/:id/confirm-return { outcome, items?, photos?, note?, incident? } → 200 data
+ * { booking (completed | flagged), incident (null, or the new incident with bare ids) }.
+ */
+export async function confirmBookingReturn(id, input = {}) {
+  return unwrap(await http.post(path(id, '/confirm-return'), buildReturnBody(input)));
+}
+
+// ── Query keys (frontend.md §8.2) ─────────────────────────────────────────────
+
+export const bookingKeys = {
+  all: ['bookings'], // every list: invalidating it refreshes mine and manage
+  mine: ['bookings', 'mine'],
+  mineList: (params) => ['bookings', 'mine', mineParams(params)],
+  manage: ['bookings', 'manage'],
+  manageList: (filters) => ['bookings', 'manage', manageParams(filters)],
+  detail: (id) => ['booking', id], // also matches ['booking', id, 'timeline'] when invalidated
+  timeline: (id) => ['booking', id, 'timeline'],
+};
+
+// The resource page's keys (frontend.md §8.2) that a booking change makes stale.
+export const resourceBookingKeys = {
+  availability: (resourceId) => ['resource', resourceId, 'availability'],
+  eligibility: (resourceId) => ['resource', resourceId, 'eligibility'],
+};
+
+/**
+ * The query keys a booking change makes stale (frontend.md §8.2, as prefixes): every booking list,
+ * the booking and its timeline, the resource's availability and eligibility, and the incident lists
+ * when an incident was opened.
+ */
+export function keysToInvalidate({ id, resourceId, incident = false } = {}) {
+  const keys = [bookingKeys.all];
+  if (id) keys.push(bookingKeys.detail(id));
+  if (resourceId) {
+    keys.push(resourceBookingKeys.availability(resourceId), resourceBookingKeys.eligibility(resourceId));
+  }
+  if (incident) keys.push(['incidents']);
+  return keys;
+}
+
+function invalidate(queryClient, keys) {
+  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+}
+
+// Errors that mean what the screen shows is out of date: refetch it so the user sees the current
+// state (the message says whether to reload).
+const STALE_CODES = new Set(['INVALID_TRANSITION', 'NOT_FOUND', 'SLOT_TAKEN', 'INELIGIBLE']);
+
+// ── Query hooks ───────────────────────────────────────────────────────────────
+
+/** GET /bookings/:id under ['booking', id]; refetched on focus. data: { data: Booking }. */
+export function useBooking(id, options = {}) {
+  return useQuery({
+    queryKey: bookingKeys.detail(id),
+    queryFn: () => getBooking(id),
+    enabled: Boolean(id),
+    staleTime: 0,
+    retry: retryReads,
+    ...options,
+  });
+}
+
+/** GET /bookings/:id/timeline under ['booking', id, 'timeline']. data: { data: [items] }. */
+export function useTimeline(id, options = {}) {
+  return useQuery({
+    queryKey: bookingKeys.timeline(id),
+    queryFn: () => getBookingTimeline(id),
+    enabled: Boolean(id),
+    staleTime: 0,
+    retry: retryReads,
+    ...options,
+  });
+}
+
+/**
+ * GET /bookings/mine under ['bookings', 'mine', { status, page, limit }]; refetched on focus. The
+ * previous page stays on screen while the next loads, but never another tab's rows.
+ */
+export function useMyBookings(params = {}, options = {}) {
+  const normalised = mineParams(params);
+  return useQuery({
+    queryKey: bookingKeys.mineList(normalised),
+    queryFn: () => listMyBookings(normalised),
+    staleTime: 0,
+    retry: retryReads,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey?.[2]?.status === normalised.status ? previous : undefined,
+    ...options,
+  });
+}
+
+/**
+ * GET /bookings/manage under ['bookings', 'manage', filters]; refetched every 30 s while the page is
+ * open (frontend.md §8.2). The previous page stays while the next loads, for the same status only.
+ */
+export function useManageBookings(filters = {}, options = {}) {
+  const normalised = manageParams(filters);
+  return useQuery({
+    queryKey: bookingKeys.manageList(normalised),
+    queryFn: () => listManageBookings(normalised),
+    staleTime: 0,
+    refetchInterval: 30 * 1000,
+    retry: retryReads,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey?.[2]?.status === normalised.status ? previous : undefined,
+    ...options,
+  });
+}
+
+// ── Mutation hooks ────────────────────────────────────────────────────────────
+// Each hook's onSuccess returns the invalidation, so `isPending` stays true until the changed
+// queries have refetched and the page shows the server's new state. Pass per-call callbacks to
+// mutate(vars, { onSuccess, onError }) for navigation, toasts and focus.
+
+function useBookingMutation(send, { keysFor }) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: (result, vars) => invalidate(queryClient, keysToInvalidate(keysFor(result, vars))),
+    onError: (err, vars) => {
+      if (STALE_CODES.has(err?.code)) invalidate(queryClient, keysToInvalidate(keysFor(null, vars)));
+    },
+  });
+}
+
+// For the lifecycle actions the variables are { id, resourceId?, ...body }: resourceId (optional,
+// never sent) refreshes the resource's availability when the result doesn't name it.
+const lifecycleKeys = (result, vars) => ({
+  id: vars?.id,
+  resourceId: idOf(result?.data?.resource) ?? idOf(result?.data?.booking?.resource) ?? vars?.resourceId,
+});
+
+/** POST /bookings. mutate({ resourceId, start, end, purpose, joinWaitlist? }). */
+export function useCreateBooking() {
+  return useBookingMutation(createBooking, {
+    keysFor: (result, vars) => ({
+      id: idOf(result?.data?.booking),
+      resourceId: vars?.resourceId,
+    }),
+  });
+}
+
+/** mutate({ id, note?, resourceId? }) */
+export function useApproveBooking() {
+  return useBookingMutation(({ id, note }) => approveBooking(id, { note }), { keysFor: lifecycleKeys });
+}
+
+/** mutate({ id, reason, resourceId? }) */
+export function useRejectBooking() {
+  return useBookingMutation(({ id, reason }) => rejectBooking(id, { reason }), { keysFor: lifecycleKeys });
+}
+
+/** mutate({ id, reason, resourceId? }) */
+export function useWaitlistBooking() {
+  return useBookingMutation(({ id, reason }) => waitlistBooking(id, { reason }), {
+    keysFor: lifecycleKeys,
+  });
+}
+
+/** mutate({ id, reason?, resourceId? }) */
+export function useCancelBooking() {
+  return useBookingMutation(({ id, reason }) => cancelBooking(id, { reason }), { keysFor: lifecycleKeys });
+}
+
+/** mutate({ id, items, overall, notes?, photos?, resourceId? }) */
+export function useCheckIn() {
+  return useBookingMutation(({ id, ...report }) => checkInBooking(id, report), { keysFor: lifecycleKeys });
+}
+
+/** mutate({ id, items, overall, notes?, photos?, resourceId? }) */
+export function useCheckOut() {
+  return useBookingMutation(({ id, ...report }) => checkOutBooking(id, report), {
+    keysFor: lifecycleKeys,
+  });
+}
+
+/** mutate({ id, outcome, items?, photos?, note?, incident?, resourceId? }) */
+export function useConfirmReturn() {
+  return useBookingMutation(({ id, ...input }) => confirmBookingReturn(id, input), {
+    keysFor: (result, vars) => ({
+      ...lifecycleKeys(result, vars),
+      incident: Boolean(result?.data?.incident) || vars?.outcome === 'issue',
+    }),
+  });
+}

@@ -510,6 +510,15 @@ describe("requestStatus", () => {
       status: "approved",
     });
   });
+
+  test("only a boolean true joins the waitlist; a truthy string or number never does", () => {
+    for (const joinWaitlist of ["false", "no", "true", 1, {}, []])
+      assert.deepEqual(
+        requestStatus({ outcome: "slot_taken" }, { joinWaitlist }),
+        { error: "SLOT_TAKEN" },
+        JSON.stringify(joinWaitlist),
+      );
+  });
 });
 
 describe("describeOpenHours", () => {

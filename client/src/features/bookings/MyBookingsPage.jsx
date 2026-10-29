@@ -1,277 +1,224 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getMyBookings, cancelBooking } from './api';
-import { StatusBadge } from '../../components/ui/StatusBadge';
-import { Button } from '../../components/ui/Button';
-import { Card } from '../../components/ui/Card';
+import { CalendarCheck, Compass } from 'lucide-react';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { ReasonDialog } from '../../components/ui/ReasonDialog';
-import { toast } from 'sonner';
-import {
-  CalendarCheck,
-  Clock,
-  MapPin,
-  ArrowRight,
-  LogIn,
-  LogOut,
-  Ban,
-  AlertTriangle,
-  Layers,
-  ChevronRight,
-} from 'lucide-react';
+import { ErrorState } from '../../components/ui/ErrorState';
+import { Pagination } from '../../components/ui/Pagination';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { pageCount, readPage } from '../../lib/paging';
+import { cn } from '../../lib/utils';
+import { MINE_PAGE_SIZE, MINE_TABS, useMyBookings } from './api';
+import { BookingCard } from './components/BookingCard';
+import { TAB_EMPTY, readTab } from './components/bookingView';
+import { eyebrowClass, linkButtonClass, pageHeadingClass } from './components/styles';
+import { useNow } from './components/useClock';
+
+// /bookings (frontend.md §6.2): tabs Upcoming (approved, checked_in) · Requests (pending,
+// waitlisted with the place in line) · Past (the rest), each one GET /bookings/mine with its
+// statuses, latest start first. Tab and page live in the URL, so a reload or a link keeps them.
+
+function ListSkeleton() {
+  return (
+    <ul aria-busy="true" className="space-y-4">
+      <li className="sr-only">Loading your bookings…</li>
+      {[0, 1, 2].map((n) => (
+        <li
+          key={n}
+          className="rounded-xl border-2 border-[#1a1a1a] p-5 bg-white shadow-[4px_4px_0_#1a1a1a] space-y-3"
+        >
+          <div className="flex justify-between gap-4">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-6 w-24" />
+          </div>
+          <Skeleton className="h-4 w-64" />
+          <Skeleton className="h-4 w-40" />
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function MyBookingsPage() {
-  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentTab = searchParams.get('tab') || 'upcoming';
+  const tab = readTab(searchParams.get('tab'));
+  const page = readPage(searchParams.get('page'));
+  const now = useNow();
+  const tabRefs = useRef({});
 
-  const [cancelModalBooking, setCancelModalBooking] = useState(null);
-  const [isCancelling, setIsCancelling] = useState(false);
+  const list = useMyBookings({ status: tab.statuses, page, limit: MINE_PAGE_SIZE });
+  const items = Array.isArray(list.data?.data) ? list.data.data : [];
+  const meta = list.data?.meta;
+  const total = Number(meta?.total) || 0;
+  const pages = pageCount(meta, MINE_PAGE_SIZE);
 
-  const { data: bookingsRes, isLoading, refetch } = useQuery({
-    queryKey: ['bookings', 'mine'],
-    queryFn: getMyBookings,
-  });
+  const setView = ({ tab: nextTab, page: nextPage }, options) =>
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (nextTab !== undefined) {
+        if (nextTab === MINE_TABS[0].id) params.delete('tab');
+        else params.set('tab', nextTab);
+        params.delete('page');
+      }
+      if (nextPage !== undefined) {
+        if (nextPage <= 1) params.delete('page');
+        else params.set('page', String(nextPage));
+      }
+      return params;
+    }, options);
 
-  const allBookings = bookingsRes?.data || [];
-
-  // Group by lifecycle tab
-  const upcoming = allBookings.filter((b) =>
-    ['approved', 'checked_in'].includes(b.status)
-  );
-  const requests = allBookings.filter((b) =>
-    ['pending', 'waitlisted'].includes(b.status)
-  );
-  const past = allBookings.filter((b) =>
-    ['completed', 'rejected', 'cancelled', 'no_show', 'expired', 'flagged'].includes(
-      b.status
-    )
-  );
-
-  const displayed =
-    currentTab === 'upcoming'
-      ? upcoming
-      : currentTab === 'requests'
-      ? requests
-      : past;
-
-  const handleCancelConfirm = async (reason) => {
-    if (!cancelModalBooking) return;
-    setIsCancelling(true);
-    try {
-      await cancelBooking(cancelModalBooking._id, reason);
-      toast.success('Booking cancelled.');
-      setCancelModalBooking(null);
-      refetch();
-    } catch (err) {
-      toast.error(err.message || 'Cancellation failed');
-    } finally {
-      setIsCancelling(false);
-    }
-  };
-
-  const formatIST = (isoString) => {
-    try {
-      const d = new Date(isoString);
-      return (
-        d.toLocaleString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          weekday: 'short',
-          day: 'numeric',
-          month: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        }) + ' IST'
+  // A cancelled booking can empty the last page: step back to the page that is now the last.
+  const settled = list.isSuccess && !list.isPlaceholderData;
+  useEffect(() => {
+    if (settled && page > pages) {
+      setSearchParams(
+        (current) => {
+          const params = new URLSearchParams(current);
+          if (pages <= 1) params.delete('page');
+          else params.set('page', String(pages));
+          return params;
+        },
+        { replace: true }
       );
-    } catch (e) {
-      return isoString;
     }
+  }, [settled, page, pages, setSearchParams]);
+
+  // Tabs (WAI-ARIA tabs pattern): one tab stop, arrows / Home / End move and select.
+  const selectTab = (id, focus = false) => {
+    if (id !== tab.id) setView({ tab: id });
+    if (focus) tabRefs.current[id]?.focus();
   };
+  const onTabKeyDown = (event) => {
+    const index = MINE_TABS.findIndex((t) => t.id === tab.id);
+    const last = MINE_TABS.length - 1;
+    const target =
+      event.key === 'ArrowRight'
+        ? index === last ? 0 : index + 1
+        : event.key === 'ArrowLeft'
+          ? index === 0 ? last : index - 1
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : null;
+    if (target === null) return;
+    event.preventDefault();
+    selectTab(MINE_TABS[target].id, true);
+  };
+
+  const empty = TAB_EMPTY[tab.id];
 
   return (
     <div className="space-y-6 font-mono">
-      {/* ── Page Header ── */}
-      <div className="border-b-2 border-[#1a1a1a] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="border-b-2 border-[#1a1a1a] pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
-          <span className="text-xs uppercase font-bold text-[#c0392b] tracking-widest block">
-            RESERVATION MANAGEMENT
-          </span>
-          <h1 className="text-2xl font-black text-[#1a1a1a] tracking-tight">
-            My Campus Bookings
-          </h1>
+          <span className={eyebrowClass}>Reservations</span>
+          <h1 className={pageHeadingClass}>My bookings</h1>
+          <p className="text-xs text-[#1a1a1a]/70 mt-1 max-w-xl">
+            Your upcoming bookings, open requests with their waitlist place, and past bookings. All
+            times are IST.
+          </p>
         </div>
-        <Link to="/explore">
-          <Button variant="primary" size="sm">
-            Book New Equipment →
-          </Button>
+        <Link to="/explore" className={linkButtonClass('outline', 'shrink-0')}>
+          <Compass className="w-4 h-4" aria-hidden="true" />
+          Book a resource
         </Link>
       </div>
 
-      {/* ── Lifecycle Tabs ── */}
-      <div className="flex border-b-2 border-[#1a1a1a] gap-2">
-        {[
-          { key: 'upcoming', label: 'Upcoming & In-Use', count: upcoming.length },
-          { key: 'requests', label: 'Pending Requests', count: requests.length },
-          { key: 'past', label: 'Past & Completed', count: past.length },
-        ].map((tab) => {
-          const isActive = currentTab === tab.key;
+      <div
+        role="tablist"
+        aria-label="Booking lists"
+        onKeyDown={onTabKeyDown}
+        className="flex gap-2 overflow-x-auto pb-1"
+      >
+        {MINE_TABS.map((t) => {
+          const active = t.id === tab.id;
           return (
             <button
-              key={tab.key}
-              onClick={() => setSearchParams({ tab: tab.key })}
-              className={`px-4 py-2.5 text-xs font-bold uppercase tracking-wider border-t-2 border-x-2 -mb-[2px] rounded-t-lg transition-all ${
-                isActive
-                  ? 'bg-white border-[#1a1a1a] text-[#1a1a1a] shadow-[2px_-2px_0_#1a1a1a]'
-                  : 'bg-[#ede8df] border-transparent text-[#1a1a1a]/60 hover:text-[#1a1a1a]'
-              }`}
+              key={t.id}
+              ref={(node) => {
+                tabRefs.current[t.id] = node;
+              }}
+              type="button"
+              role="tab"
+              id={`bookings-tab-${t.id}`}
+              aria-selected={active}
+              aria-controls="bookings-panel"
+              tabIndex={active ? 0 : -1}
+              onClick={() => selectTab(t.id)}
+              className={cn(
+                'px-4 py-2 min-h-[44px] text-sm font-bold uppercase tracking-wider rounded-md border-2 whitespace-nowrap transition-all',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2',
+                active
+                  ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
+                  : 'bg-white text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
+              )}
             >
-              <span>{tab.label}</span>
-              <span
-                className={`ml-2 px-1.5 py-0.2 rounded text-[10px] font-black ${
-                  isActive ? 'bg-[#183d2d] text-white' : 'bg-[#1a1a1a]/15 text-[#1a1a1a]'
-                }`}
-              >
-                {tab.count}
-              </span>
+              {t.label}
             </button>
           );
         })}
       </div>
 
-      {/* ── Booking List ── */}
-      {isLoading ? (
-        <div className="p-12 text-center">
-          <div className="w-8 h-8 border-4 border-[#183d2d] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-          <span className="text-xs font-bold">LOADING RESERVATIONS...</span>
-        </div>
-      ) : displayed.length > 0 ? (
-        <div className="space-y-4">
-          {displayed.map((booking) => {
-            const isApproved = booking.status === 'approved';
-            const isInUse = booking.status === 'checked_in';
-            const canCancel = ['pending', 'approved', 'waitlisted'].includes(booking.status);
+      <section
+        id="bookings-panel"
+        role="tabpanel"
+        aria-labelledby={`bookings-tab-${tab.id}`}
+        className="space-y-4"
+      >
+        <h2 className="sr-only">{tab.label}</h2>
 
-            return (
-              <div
-                key={booking._id}
-                className="rounded-xl border-2 border-[#1a1a1a] bg-white p-5 shadow-[4px_4px_0_#1a1a1a] hover:shadow-[5px_5px_0_#1a1a1a] transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                {/* Left Info */}
-                <div className="space-y-2 max-w-xl">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge
-                      status={booking.status}
-                      waitlistPosition={booking.waitlistPosition}
-                    />
-                    <span className="text-xs text-[#1a1a1a]/50 font-bold">
-                      REF: {booking._id}
-                    </span>
-                  </div>
+        {list.isPending && <ListSkeleton />}
 
-                  <h3 className="text-base font-black text-[#1a1a1a] tracking-tight">
-                    <Link
-                      to={`/bookings/${booking._id}`}
-                      className="hover:text-[#c0392b] transition-colors"
-                    >
-                      {booking.resource?.title || 'Resource'}
-                    </Link>
-                  </h3>
+        {list.isError && !list.data && (
+          <ErrorState
+            error={list.error}
+            title="Couldn't load your bookings"
+            onRetry={() => list.refetch()}
+            retrying={list.isFetching}
+          />
+        )}
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#1a1a1a]/70">
-                    <span className="flex items-center gap-1.5 font-bold text-[#183d2d]">
-                      <Clock className="w-3.5 h-3.5" />
-                      {formatIST(booking.start)} → {formatIST(booking.end)}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-[#c0392b]" />
-                      {booking.resource?.location || booking.resource?.orgUnit?.name}
-                    </span>
-                  </div>
+        {list.isSuccess && items.length === 0 && (
+          <EmptyState
+            icon={CalendarCheck}
+            title={empty.title}
+            description={empty.description}
+          />
+        )}
 
-                  {booking.purpose && (
-                    <p className="text-xs text-[#1a1a1a]/80 line-clamp-1 italic bg-[#f5f0e8] px-2 py-1 rounded border border-[#1a1a1a]/15">
-                      &ldquo;{booking.purpose}&rdquo;
-                    </p>
-                  )}
-                </div>
+        {items.length > 0 && (
+          <>
+            <div className="flex items-center justify-between gap-3 text-xs text-[#1a1a1a]/70">
+              <span>
+                {total} {total === 1 ? 'booking' : 'bookings'} · latest start first
+              </span>
+              {list.isFetching && <span aria-hidden="true">Updating…</span>}
+            </div>
+            {/* A failed refetch keeps the rows on screen, with the error above them. */}
+            {list.isError && (
+              <ErrorState
+                error={list.error}
+                title="Couldn't refresh your bookings"
+                onRetry={() => list.refetch()}
+                retrying={list.isFetching}
+              />
+            )}
+            <ul className={cn('space-y-4', list.isPlaceholderData && 'opacity-60')}>
+              {items.map((booking) => (
+                <BookingCard key={booking._id} booking={booking} now={now} />
+              ))}
+            </ul>
+          </>
+        )}
 
-                {/* Right Contextual Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-[#1a1a1a]/10">
-                  {isApproved && (
-                    <Link to={`/bookings/${booking._id}/check-in`}>
-                      <Button variant="primary" size="sm" className="bg-[#183d2d]">
-                        <LogIn className="w-3.5 h-3.5" />
-                        Check In Now
-                      </Button>
-                    </Link>
-                  )}
-
-                  {isInUse && (
-                    <Link to={`/bookings/${booking._id}/check-out`}>
-                      <Button variant="primary" size="sm" className="bg-[#1abc9c] text-[#1a1a1a]">
-                        <LogOut className="w-3.5 h-3.5" />
-                        Check Out & Return
-                      </Button>
-                    </Link>
-                  )}
-
-                  {canCancel && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCancelModalBooking(booking)}
-                      className="text-[#c0392b] hover:bg-[#c0392b]/10"
-                    >
-                      <Ban className="w-3.5 h-3.5" />
-                      Cancel
-                    </Button>
-                  )}
-
-                  <Link to={`/bookings/${booking._id}`}>
-                    <Button variant="outline" size="sm">
-                      Timeline
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState
-          title={`No ${currentTab} bookings`}
-          description={
-            currentTab === 'upcoming'
-              ? 'You have no confirmed upcoming equipment reservations.'
-              : currentTab === 'requests'
-              ? 'No pending approval requests in queue.'
-              : 'No past booking records in your history.'
-          }
-          actionLabel="Explore Campus Gear"
-          onAction={() => (window.location.href = '/explore')}
+        <Pagination
+          page={page}
+          pageCount={pages}
+          busy={list.isFetching}
+          onPageChange={(next) => setView({ page: next })}
+          label={`${tab.label} pages`}
         />
-      )}
-
-      {/* ── Cancel Reason Dialog ── */}
-      <ReasonDialog
-        isOpen={!!cancelModalBooking}
-        onClose={() => setCancelModalBooking(null)}
-        onSubmit={handleCancelConfirm}
-        title="Cancel Equipment Reservation"
-        subtitle={`Please state the reason for cancelling reservation ${cancelModalBooking?._id}.`}
-        actionLabel="Confirm Cancellation"
-        actionVariant="danger"
-        loading={isCancelling}
-        templates={[
-          'Schedule clash with departmental coursework.',
-          'Project completed earlier than expected.',
-          'Selected wrong equipment or timeframe.',
-        ]}
-      />
+      </section>
     </div>
   );
 }
-

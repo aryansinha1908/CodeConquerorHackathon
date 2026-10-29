@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { logout as apiLogout } from '../../features/auth/api';
+import { queryClient } from '../queryClient';
 import { toast } from 'sonner';
 import {
+  Bell,
   Compass,
   IdCard,
   CalendarCheck,
@@ -16,6 +18,40 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
+import { NotificationBell } from '../../components/LazyPages';
+import {
+  bellLabel,
+  unreadBadgeText,
+  unreadCountOf,
+  useUnreadCount,
+} from '../../features/notifications/api';
+
+/**
+ * The bell while its code loads (components/LazyPages.jsx): the same look, label and badge as
+ * NotificationBell's menu button, but not a control, so there is nothing to tab to or press that
+ * does nothing, and no focus to lose to <body> when the real button replaces it. It only reads the
+ * cached count (enabled: false); the real bell fetches and polls it, so there is no second request.
+ */
+export function BellFallback() {
+  const unread = unreadCountOf(useUnreadCount({ enabled: false }).data) ?? 0;
+  return (
+    <span
+      role="img"
+      aria-label={bellLabel(unread)}
+      className="relative inline-block p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]"
+    >
+      <Bell className="w-4 h-4" aria-hidden="true" />
+      {unread > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full border-2 border-[#1a1a1a] bg-[#c0392b] text-white text-[10px] font-black leading-none flex items-center justify-center"
+        >
+          {unreadBadgeText(unread)}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export function AppLayout() {
   const navigate = useNavigate();
@@ -34,16 +70,25 @@ export function AppLayout() {
   const isVerified = user?.verification?.status === 'approved' || isManager || isAdmin;
   const isPending = user?.verification?.status === 'pending';
 
+  // frontend.md §8.1 step 4. POST /auth/logout always answers 200 and clears the cookie. The refresh
+  // cookie is httpOnly, so only the server can end the session: if the call fails (network, 5xx), the
+  // next visit would sign straight back in, so the user stays signed in here and is told so. On
+  // success, leave the guarded routes first (flushSync commits the navigation before clear(), so
+  // RequireAuth never sees the empty store and adds ?next=), then drop the token and every cached query.
   const handleLogout = async () => {
     try {
       await apiLogout();
-    } catch (e) {
-      // ignore
-    } finally {
-      clear();
-      toast.success('Logged out successfully');
-      navigate('/login');
+    } catch (err) {
+      toast.error("Couldn't reach the server, so you're still signed in.", {
+        description: err?.requestId ? `ref: ${err.requestId}` : 'Check your connection and try again.',
+        action: { label: 'Retry', onClick: () => handleLogout() },
+      });
+      return;
     }
+    await navigate('/login', { replace: true, flushSync: true });
+    clear();
+    queryClient.clear();
+    toast.success('Logged out successfully');
   };
 
   const navLinkClass = ({ isActive }) =>
@@ -142,6 +187,11 @@ export function AppLayout() {
                 {user?.department?.name || user?.memberType || 'NIT JSR'}
               </span>
             </div>
+
+            {/* frontend.md §7: the unread count and the latest 5, on every page of the app shell. */}
+            <Suspense fallback={<BellFallback />}>
+              <NotificationBell />
+            </Suspense>
 
             <button
               onClick={handleLogout}

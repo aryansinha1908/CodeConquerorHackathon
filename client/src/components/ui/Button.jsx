@@ -6,6 +6,10 @@ import { cn } from '../../lib/utils';
  *
  * variant: 'primary' | 'outline' | 'ghost' | 'danger'
  * size:    'sm' | 'md' | 'lg'
+ *
+ * `loading` and `aria-disabled` keep the button focusable and swallow its clicks (and so the form
+ * submit a click would start). `disabled` would drop the focus of a keyboard user who just pressed
+ * it to <body> (frontend.md §10.3), so use it only for a button that wasn't pressed.
  */
 export function Button({
   variant = 'primary',
@@ -14,13 +18,17 @@ export function Button({
   children,
   disabled,
   loading,
+  onClick,
+  'aria-disabled': ariaDisabled,
   ...props
 }) {
+  const inert = !disabled && Boolean(loading || ariaDisabled === true || ariaDisabled === 'true');
   const base =
     'inline-flex items-center justify-center gap-2 font-bold font-mono tracking-tight ' +
     'border-2 border-[#1a1a1a] transition-all duration-150 ' +
     'active:translate-x-[2px] active:translate-y-[2px] ' +
     'disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0 ' +
+    'aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:shadow-none aria-disabled:translate-x-0 aria-disabled:translate-y-0 ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2';
 
   const variants = {
@@ -30,8 +38,9 @@ export function Button({
       'bg-transparent text-[#1a1a1a] shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
     ghost:
       'bg-transparent text-[#1a1a1a] border-transparent shadow-none hover:bg-[#1a1a1a]/10',
+    // #a93226, not #e74c3c: white on #e74c3c is 3.8:1, under the 4.5:1 of frontend.md §10.3.
     danger:
-      'bg-[#e74c3c] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
+      'bg-[#a93226] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
     forest:
       'bg-[#183d2d] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
   };
@@ -45,7 +54,10 @@ export function Button({
   return (
     <button
       className={cn(base, variants[variant] ?? variants.primary, sizes[size], className)}
-      disabled={disabled || loading}
+      disabled={disabled}
+      aria-disabled={inert || undefined}
+      aria-busy={(loading && !disabled) || undefined}
+      onClick={inert ? (event) => event.preventDefault() : onClick}
       {...props}
     >
       {loading && (

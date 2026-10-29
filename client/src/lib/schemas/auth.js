@@ -1,14 +1,14 @@
 import { z } from 'zod';
 
-/** Campus email — must be @nitjsr.ac.in */
+/**
+ * Campus email: only the format is checked here. The allowed domains are server config
+ * (ALLOWED_EMAIL_DOMAINS, default nitjsr.ac.in), and the server's VALIDATION_ERROR detail for
+ * `email` names them, so the form shows that message instead of guessing the list.
+ */
 export const campusEmail = z
   .string()
   .min(1, 'Email is required')
-  .email('Enter a valid email address')
-  .refine(
-    (v) => v.toLowerCase().endsWith('@nitjsr.ac.in'),
-    'Use your college email (@nitjsr.ac.in)'
-  );
+  .email('Enter a valid email address');
 
 /** Password: 8–72 chars, at least one letter and one digit */
 export const password = z

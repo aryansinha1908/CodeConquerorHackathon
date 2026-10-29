@@ -254,7 +254,7 @@ stateDiagram-v2
 | `checked_in` → `checked_out`                        | Member                       | Condition report                                       | Audit; notify managers ("confirm return")                                                                        |
 | `checked_out` → `completed`                         | Manager                      | `outcome: ok`                                          | Audit; notify member                                                                                             |
 | `checked_out` → `flagged`                           | Manager                      | `outcome: issue` plus incident details                 | Incident created; audit; notify member and admins                                                                |
-| `flagged` → `completed`                             | Manager / Admin              | Incident resolved                                      | Audit; notify member                                                                                             |
+| `flagged` → `completed`                             | System                       | A manager or admin resolves the last open incident     | Audit (actor `system`); the member's `incident.resolved` notice says the booking is closed                     |
 
 **No self-review.** A manager can't approve, reject, waitlist or confirm the return of their own booking. Another manager of the unit, or an admin, must do it.
 
@@ -303,10 +303,14 @@ Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 | `VALIDATION_ERROR`    | 400         |
 | `UNAUTHENTICATED`     | 401         |
 | `EMAIL_NOT_VERIFIED`  | 403         |
+| `INVALID_CREDENTIALS` | 401         |
+| `INVALID_OTP`         | 400         |
+| `EMAIL_TAKEN`         | 409         |
 | `FORBIDDEN`           | 403         |
 | `NOT_FOUND`           | 404         |
 | `SLOT_TAKEN`          | 409         |
 | `INVALID_TRANSITION`  | 409         |
+| `CONFLICT`            | 409         |
 | `INELIGIBLE`          | 422         |
 | `RATE_LIMITED`        | 429         |
 | `AI_QUOTA_EXCEEDED`   | 429         |
@@ -324,18 +328,23 @@ Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 
 **Auth**
 
-| Method | Path               | Auth                                 | Body / query (Zod)                                                             | Rate tier                      | Cache |
-| ------ | ------------------ | ------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------ | ----- |
-| POST   | `/auth/register`   | public                               | `name, email, password`                                                        | `register` (email)             | —     |
-| POST   | `/auth/verify-otp` | public                               | `email, otp`. On success, signs the user in (access token plus refresh cookie) | `otpVerify` (email)            | —     |
-| POST   | `/auth/resend-otp` | public                               | `email`                                                                        | `otpSend` (email)              | —     |
-| POST   | `/auth/login`      | public                               | `email, password`                                                              | `login` (email, failures only) | —     |
-| POST   | `/auth/refresh`    | refresh cookie                       | —                                                                              | `general` (userId from cookie) | —     |
-| POST   | `/auth/logout`     | auth                                 | —                                                                              | `general`                      | —     |
-| GET    | `/auth/me`         | auth                                 | —                                                                              | `general`                      | —     |
-| POST   | `/auth/demo-login` | public, **only if `DEMO_MODE=true`** | `role: member \| member2 \| faculty \| manager \| admin`                       | `demo` (role)                  | —     |
+| Method | Path                | Auth                                 | Body / query (Zod)                                                             | Rate tier                                                   | Cache |
+| ------ | ------------------- | ------------------------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------- | ----- |
+| POST   | `/auth/register`    | public                               | `name, email, password`                                                        | `register` (email), then `registerIp` and `otpSendIp` (IP)  | —     |
+| POST   | `/auth/verify-otp`  | public                               | `email, otp`. On success, signs the user in (access token plus refresh cookie) | `otpVerify` (email)                                         | —     |
+| POST   | `/auth/resend-otp`  | public                               | `email`                                                                        | `otpSend` and `otpSendDaily` (email), then `otpSendIp` (IP) | —     |
+| POST   | `/auth/login`       | public                               | `email, password`                                                              | `login` (email), then `loginIp` (IP); failures only         | —     |
+| POST   | `/auth/refresh`     | refresh cookie                       | —                                                                              | `general` (userId from cookie)                              | —     |
+| POST   | `/auth/logout`      | refresh cookie                       | — (works with an expired access token)                                         | `general`                                                   | —     |
+| GET    | `/auth/me`          | auth                                 | —                                                                              | `general`                                                   | —     |
+| GET    | `/auth/demo-config` | public                               | — → `{ demoMode, roles }`; the login page shows the demo buttons from it       | none                                                        | —     |
+| POST   | `/auth/demo-login`  | public, **only if `DEMO_MODE=true`** | `role: student \| student2 \| faculty \| manager \| admin`                     | `demoIp` (role and IP), then `demo` (role)                  | —     |
+
+Every code emailed (register, resend-otp, an unverified login) also counts against the network's daily share, `otpSendIp`, and takes a slot of the global cap on code emails (§11).
 
 If a user whose email is not yet verified tries to log in, they get `403 EMAIL_NOT_VERIFIED`, a fresh OTP is sent, and the client redirects them to `/verify-otp`.
+
+A wrong email or password is `401 INVALID_CREDENTIALS` with the same message for both. It is deliberately not `UNAUTHENTICATED`: the client tries a token refresh on `UNAUTHENTICATED` only, which would be wrong on the login page. `register` and `resend-otp` never reveal whether an account exists, except that registering an already verified email is `409 EMAIL_TAKEN`.
 
 **Verification**
 
@@ -345,7 +354,11 @@ If a user whose email is not yet verified tries to log in, they get `403 EMAIL_N
 | GET    | `/verification/status`                 | auth                  | —                                                                        | `general` | —     |
 | GET    | `/admin/verifications`                 | admin                 | `status=pending\|approved\|rejected, page, limit`                        | `general` | —     |
 | GET    | `/admin/verifications/:userId/id-card` | admin                 | — (returns a 5-min signed URL; **audited**)                              | `general` | —     |
-| PATCH  | `/admin/verifications/:userId`         | admin                 | `decision: approve\|reject, reason, memberType, department`              | `general` | —     |
+| PATCH  | `/admin/verifications/:userId`         | admin                 | `decision: approve\|reject, submittedAt, reason, memberType, department` | `general` | —     |
+
+- `submittedAt` is the reviewed queue item's own value. If the member has replaced the card since, the decision is 409, so a decision never lands on a card the admin didn't see.
+- A decision deletes the ID image first; if Cloudinary can't delete it, the answer is 503 and nothing is saved.
+- The ID-card link is a Cloudinary download URL that expires within 5 minutes, sent with `Cache-Control: no-store`; every view is audited as `verification.id_viewed`.
 
 **OrgUnits**
 
@@ -358,16 +371,16 @@ If a user whose email is not yet verified tries to log in, they get `403 EMAIL_N
 
 **Resources**
 
-| Method | Path                          | Auth                   | Body / query                                                                                                                | Rate tier | Cache                              |
-| ------ | ----------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------- |
-| GET    | `/resources`                  | auth                   | `q, category, orgUnit, memberType, date, status` (manager\*/admin only; default `active`), `page, limit(≤50), eligibleOnly` | `general` | `cache:resources:v{n}:{hash}` 60 s |
-| GET    | `/resources/:id`              | auth                   | —                                                                                                                           | `general` | `cache:resource:{id}` 5 min        |
-| POST   | `/resources`                  | manager (of `orgUnit`) | see `backend.md` §7                                                                                                         | `general` | bump list version                  |
-| PATCH  | `/resources/:id`              | manager\*              | partial                                                                                                                     | `general` | delete key, bump version           |
-| PATCH  | `/resources/:id/status`       | manager\*              | `status: active\|maintenance\|archived, reason`                                                                             | `general` | delete key, bump version           |
-| GET    | `/resources/:id/availability` | auth                   | `from, to` (≤ 14 days) → open hours plus busy blocks (**no borrower names**)                                                | `general` | —                                  |
-| GET    | `/resources/:id/eligibility`  | auth                   | `start?, end?` → rule checklist for the current user                                                                        | `general` | —                                  |
-| GET    | `/resources/:id/bookings`     | manager\*              | `status, from, to, page`                                                                                                    | `general` | —                                  |
+| Method | Path                          | Auth                   | Body / query                                                                                                                                                                                                          | Rate tier | Cache                              |
+| ------ | ----------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------- |
+| GET    | `/resources`                  | auth                   | `q, category, orgUnit, memberType, date` (IST `YYYY-MM-DD`), `status` (comma list, e.g. `active,maintenance`; non-active only for managers of the unit or admins, default `active`), `page, limit(≤50), eligibleOnly` | `general` | `cache:resources:v{n}:{hash}` 60 s |
+| GET    | `/resources/:id`              | auth                   | —                                                                                                                                                                                                                     | `general` | `cache:resource:{id}` 5 min        |
+| POST   | `/resources`                  | manager (of `orgUnit`) | see `backend.md` §7                                                                                                                                                                                                   | `general` | bump list version                  |
+| PATCH  | `/resources/:id`              | manager\*              | partial                                                                                                                                                                                                               | `general` | delete key, bump version           |
+| PATCH  | `/resources/:id/status`       | manager\*              | `status: active\|maintenance\|archived, reason`                                                                                                                                                                       | `general` | delete key, bump version           |
+| GET    | `/resources/:id/availability` | auth                   | `from, to` (≤ 14 days) → `{ quantity, openWindows[{start, end}], busy[{start, end, inUse, full}] }`. Blackouts are already cut out of `openWindows`; **no borrower data**                                             | `general` | —                                  |
+| GET    | `/resources/:id/eligibility`  | auth                   | `start?, end?` → rule checklist for the current user                                                                                                                                                                  | `general` | —                                  |
+| GET    | `/resources/:id/bookings`     | manager\*              | `status, from, to, page`                                                                                                                                                                                              | `general` | —                                  |
 
 With `eligibleOnly`, the base list is cached and then filtered for the current user in memory, so the cache holds no per-user data.
 
@@ -379,9 +392,13 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 | POST   | `/badges`              | manager / admin               | `name, code, orgUnit, description, validityDays?, evidenceRequired` | `general` | invalidate            |
 | GET    | `/badges/mine`         | auth                          | —                                                                   | `general` | —                     |
 | POST   | `/badges/:id/requests` | verified                      | `note`, optional multipart `evidence`                               | `upload`  | —                     |
-| GET    | `/badge-requests`      | manager (badges of own units) | `status=requested, page`                                            | `general` | —                     |
+| GET    | `/badge-requests`      | manager (badges of own units) | `status=requested, badgeId?, page, limit`                           | `general` | —                     |
 | PATCH  | `/badge-requests/:id`  | manager\*                     | `decision: approve\|reject, reason`                                 | `general` | —                     |
 | POST   | `/badges/:id/grant`    | manager\*                     | `userId, note`                                                      | `general` | —                     |
+
+- `cache:badges` stores each badge's issuer as an id. The unit's name comes from `cache:orgunits` when the list is read, so renaming a unit needs no badge invalidation. Badges of an inactive unit aren't listed, and can't be requested.
+- Nobody but an admin decides on their own badge request or grants themselves a badge, the same rule as for bookings.
+- `/badges/mine` gives each row a `state` (`active | expired | requested | rejected | revoked`) and shows evidence only as `hasEvidence`. The manager queue carries the evidence's `publicId`, which needs a signed URL to open.
 
 **Bookings**
 
@@ -406,16 +423,22 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 | Method | Path                      | Auth                                          | Body / query                                                      | Rate tier | Cache |
 | ------ | ------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | --------- | ----- |
 | POST   | `/incidents`              | borrower of booking / manager\*               | `bookingId?, resourceId, type, severity, description, photos[]`   | `general` | —     |
-| GET    | `/incidents`              | member (own) / manager (unit) / admin         | `status, type, severity, resourceId, page`                        | `general` | —     |
+| GET    | `/incidents`              | member (own) / manager (unit) / admin         | `status` (one or a comma list), `type, severity, resourceId, page, limit` | `general` | —     |
 | GET    | `/incidents/:id`          | parties / manager\* / admin                   | —                                                                 | `general` | —     |
 | POST   | `/incidents/:id/comments` | parties / manager\* / admin                   | `text`                                                            | `general` | —     |
 | POST   | `/incidents/:id/resolve`  | manager\* (low/medium severity) / admin (any) | `outcome: no_action\|warning\|repair_required\|strike, rationale` | `general` | —     |
+
+- **Parties** are the booking's borrower and the reporter. A **member's own** incidents are those they reported and those on their bookings, including the sweeper's.
+- **Reporting:** the borrower can report on an `approved`, `checked_in`, `checked_out`, `completed` or `flagged` booking, up to 7 days after it ends. The unit's managers can report with no time limit, and also without a booking. Reporting never changes the booking's status: only `confirm-return` with an issue flags it.
+- **Status:** `open` → `in_review` on the first comment by a manager or admin → `resolved`. A resolved incident's thread is closed.
+- **Resolving:** nobody but an admin resolves an incident on their own booking. A `strike` needs a booking and adds one to its borrower's `strikes`.
+- **Closing the booking:** resolving the last unresolved incident of a `flagged` booking closes it (`closeFlagged`, by the system).
 
 **Notifications**
 
 | Method | Path                          | Auth | Body / query          | Rate tier | Cache |
 | ------ | ----------------------------- | ---- | --------------------- | --------- | ----- |
-| GET    | `/notifications`              | auth | `unread?, page`       | `general` | —     |
+| GET    | `/notifications`              | auth | `unread?, page, limit` → `meta.unread` too | `general` | —     |
 | GET    | `/notifications/unread-count` | auth | — (polled every 30 s) | `general` | —     |
 | PATCH  | `/notifications/:id/read`     | auth | —                     | `general` | —     |
 | PATCH  | `/notifications/read-all`     | auth | —                     | `general` | —     |
@@ -424,7 +447,7 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 
 | Method | Path                       | Auth                              | Body / query                                                                                                        | Rate tier | Cache     |
 | ------ | -------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
-| GET    | `/audit`                   | admin (all) / manager (own units) | `entityType, entityId, actorId, action, from, to, page`                                                             | `general` | —         |
+| GET    | `/audit`                   | admin (all) / manager (own units) | `entityType, entityId, actorId, action, orgUnit, from, to` (`[from, to)`), `page, limit`; entries with no unit are admin-only | `general` | —         |
 | POST   | `/uploads/images`          | verified                          | multipart `images` (≤ 3, jpg/png/webp, ≤ 5 MB each) → `[{url, publicId}]`                                           | `upload`  | —         |
 | GET    | `/admin/users`             | admin                             | `q, role, verification, page`                                                                                       | `general` | —         |
 | PATCH  | `/admin/users/:id/roles`   | admin                             | `roles[], managedOrgUnits[]`                                                                                        | `general` | —         |
@@ -459,11 +482,13 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 ### 7.1 Tokens
 
 - **Access token:** a JWT (HS256) valid for **15 min**, holding `sub, roles, memberType, managedOrgUnits, verified`. It is kept **in memory** on the client (Zustand), never in localStorage.
-- **Refresh token:** a JWT valid for **7 days** with a `jti`.
+- **Refresh token:** a JWT valid for **7 days** holding `{ sub, fam, jti }`.
   - It is set as an `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth` cookie.
-  - Its `jti` is allow-listed in Redis (`auth:refresh:{userId}:{jti}`, TTL 7 days).
-  - It **rotates** on every refresh: the old `jti` is deleted and a new one issued.
-  - If an already-used `jti` shows up again, every refresh token for that user is revoked (reuse detection).
+  - Each sign-in starts a **token family** (`fam`, one per session). Redis keeps one key per family, `auth:refresh:{userId}:{familyId}`, holding the family's current `jti` (TTL 7 days).
+  - It **rotates** on every refresh, in one atomic Lua script: the current `jti` is replaced by a new one.
+  - **Reuse detection:** a `jti` that isn't the family's current one ends **that family only** (one `DEL`), and the request gets 401. The `jti` just replaced stays usable for 30 seconds, so two tabs or a retried request refreshing at the same moment both stay signed in. Ending only the one family matters because judges share the demo accounts: one replayed token must not sign out every judge on that role.
+  - Turning `DEMO_MODE` off ends demo sessions at their next refresh.
+- **Sign-up proof:** `register` (and a login with the right password on an unverified account) also sets an `httpOnly; SameSite=Strict` cookie `signupProof`, an HMAC keyed by the account's current password hash. `verify-otp` requires it, so someone who re-registers an unverified email from another browser can't end up owning the account once the real owner enters the code.
 - **Passwords:** bcrypt with cost 12. Policy: 8–72 characters, at least one letter and one digit (72 is bcrypt's input limit).
 - **Suspension:** a suspended user can still log in, but every mutating route returns 403 `FORBIDDEN` with the suspension reason and end date.
 
@@ -580,24 +605,25 @@ POST /bookings
 
 ### 10.1 Key catalogue
 
-| Key                                  | Type                                   | TTL    | Purpose                                    |
-| ------------------------------------ | -------------------------------------- | ------ | ------------------------------------------ |
-| `otp:{email}`                        | string (sha256 hash)                   | 10 min | Email OTP                                  |
-| `otp:tries:{email}`                  | counter                                | 10 min | Max 5 attempts, then the OTP is deleted    |
-| `auth:refresh:{userId}:{jti}`        | string                                 | 7 days | Refresh-token allowlist and rotation       |
-| `rl:{tier}:{key}`                    | counter (`lib/redisRateLimitStore.js`) | window | Rate limiting (§11)                        |
-| `lock:resource:{id}`                 | string (uuid)                          | 5 s    | Booking create and approve lock (§9)       |
-| `lock:cron:sweep`                    | string                                 | 4 min  | Ensures only one instance runs the sweeper |
-| `cache:resources:ver`                | counter                                | none   | Namespace version for list invalidation    |
-| `cache:resources:v{n}:{sha1(query)}` | JSON                                   | 60 s   | Resource list / search results             |
-| `cache:resource:{id}`                | JSON                                   | 5 min  | Resource detail                            |
-| `cache:orgunits`, `cache:badges`     | JSON                                   | 10 min | Rarely changing catalogues                 |
-| `ai:{q}:burst:{userId}`              | flag                                   | 10 s   | AI per-user burst limit (cool-to-have)     |
-| `ai:{q}:user:{userId}:{YYYYMMDD}`    | counter                                | 48 h   | AI per-user daily quota                    |
-| `ai:{q}:global:{YYYYMMDD}`           | counter                                | 48 h   | AI global daily cap                        |
-| `ai:{q}:rpm:{YYYYMMDDHHmm}`          | counter                                | 120 s  | AI global per-minute cap                   |
-| `ai:cache:{feature}:{sha256(input)}` | JSON                                   | 24 h   | Cached AI responses (a hit costs no quota) |
-| `ai:circuit`                         | flag                                   | 10 min | Opened when Gemini returns 429             |
+| Key                                  | Type                                   | TTL    | Purpose                                                      |
+| ------------------------------------ | -------------------------------------- | ------ | ------------------------------------------------------------ |
+| `otp:{email}`                        | string (sha256 hash)                   | 10 min | Email OTP                                                    |
+| `otp:tries:{email}`                  | counter                                | 10 min | Max 5 attempts, then the OTP is deleted                      |
+| `auth:refresh:{userId}:{familyId}`   | string (current jti)                   | 7 days | One per session: rotation, reuse detection                   |
+| `rl:{tier}:{key}`                    | counter (`lib/redisRateLimitStore.js`) | window | Rate limiting (§11); the key is a user id, email, role or IP |
+| `rl:otpEmail:global`                 | sorted set (send times)                | 24 h   | Global cap on code emails (§11)                              |
+| `lock:resource:{id}`                 | string (uuid)                          | 5 s    | Booking create and approve lock (§9)                         |
+| `lock:cron:sweep`                    | string                                 | 4 min  | Ensures only one instance runs the sweeper                   |
+| `cache:resources:ver`                | counter                                | none   | Namespace version for list invalidation                      |
+| `cache:resources:v{n}:{sha1(query)}` | JSON                                   | 60 s   | Resource list / search results                               |
+| `cache:resource:{id}`                | JSON                                   | 5 min  | Resource detail                                              |
+| `cache:orgunits`, `cache:badges`     | JSON                                   | 10 min | Rarely changing catalogues                                   |
+| `ai:{q}:burst:{userId}`              | flag                                   | 10 s   | AI per-user burst limit (cool-to-have)                       |
+| `ai:{q}:user:{userId}:{YYYYMMDD}`    | counter                                | 48 h   | AI per-user daily quota                                      |
+| `ai:{q}:global:{YYYYMMDD}`           | counter                                | 48 h   | AI global daily cap                                          |
+| `ai:{q}:rpm:{YYYYMMDDHHmm}`          | counter                                | 120 s  | AI global per-minute cap                                     |
+| `ai:cache:{feature}:{sha256(input)}` | JSON                                   | 24 h   | Cached AI responses (a hit costs no quota)                   |
+| `ai:circuit`                         | flag                                   | 10 min | Opened when Gemini returns 429                               |
 
 `{q}` is a literal **hash tag**. It keeps every AI-quota key in one cluster slot, so the multi-key Lua script also works on clustered providers. Dates are **IST** (`Asia/Kolkata`).
 
@@ -618,30 +644,47 @@ POST /bookings
 
 ---
 
-## 11. Rate limiting (no IP-based keys)
+## 11. Rate limiting (never IP alone)
 
-**Why there are no IP keys.** Hostels and departments share campus Wi-Fi, so hundreds of students reach the internet through a handful of public IPs. A per-IP limit would let one heavy user lock out a whole hostel. So:
+**Why IP is never the only key.** Hostels and departments share campus Wi-Fi, so hundreds of students reach the internet through a handful of public IPs. A per-IP limit on its own would let one heavy user lock out a whole hostel. So:
 
 1. **Every non-auth route requires login**, so every request has a `userId` to key on.
-2. **Auth routes key on the normalised email** (lower-cased and trimmed). Requests are validated by Zod _before_ the limiter runs, so the key always exists.
-3. `app.set('trust proxy', 1)` stays on, but only so logs record the real client address. **It is never used as a limiter key.**
+2. **Auth routes key on the normalised email** (lower-cased and trimmed), and demo-login on the role. Requests are validated _before_ the limiter runs, so the key always exists.
+3. **Coarse IP ceilings are stacked on those keys, never instead of them.** Keyed on the email alone, one address could rotate through made-up campus emails, and each sign-up costs a bcrypt hash and a code email. Keyed on the role alone, about 60 scripted demo-logins locked every judge out of that role for 15 minutes. So `register`, `login` and `demo-login` each add a per-IP tier, generous enough for a hostel behind one NAT, and every code email counts against a per-IP daily share (point 4). Stacked tiers run the narrower key first (email before IP, role and IP before role): a request the narrow tier refuses doesn't use up the counter a whole network, or every judge, shares. A login the IP ceiling refuses never reached the password check, so it isn't counted as a failed attempt on that account either.
+4. **Code emails have a global cap**: at most 250 in any 24 hours, under the free SMTP quotas (Brevo 300 a day, Gmail about 500). It's a sliding window (a sorted set of send times), so it holds over every 24 hours whichever day the provider counts. `authService` takes a slot wherever it sends a code. Once the cap is used up:
+   - `register` and `resend-otp` answer `503 SERVICE_UNAVAILABLE` "We've reached today's limit for emailing codes, so no code was sent. Try again in 3 hours.", with `Retry-After` and `details.retryAfterSeconds`. `register` checks before it writes anything, so an unverified account keeps its password and its last code.
+   - `resend-otp` checks for every address, existing or not, so the 503 says nothing about which have accounts. Only an unverified account then takes a slot, after the answer.
+   - An unverified login still gets its `403 EMAIL_NOT_VERIFIED`, without a new code.
+   - The trade-off is deliberate: whoever burns the cap stops sign-ups for everyone for up to a day, instead of getting the SMTP account refused or suspended.
+   - **Each network gets a share** (`otpSendIp`, 50 a day per address), so it takes five networks to use the cap up. Without it, one address filled the cap in about 20 seconds: 63 sign-ups with made-up campus emails (no inbox needed, and well under `registerIp`), then three resends each. The share is stacked last on `register` and `resend-otp`, and the code an unverified login emails counts against it too (`takeOtpSend`, like `otpSend`).
+   - Someone calling the Render URL directly can write a new address into `X-Forwarded-For` each time (point 5) and so get past the share. For them only the cap is left. Closing that needs Vercel to mark its requests with a secret Render checks, which isn't built. A warning is logged when 80% of the cap is used.
+5. **`trust proxy` is a hop count** (`TRUST_PROXY_HOPS`, default 1 for Render's proxy alone, and 2 in `render.yaml`), never `true`, which would trust whatever the client sends (express-rate-limit warns about exactly that). The IP tiers key on every address the trusted proxies forwarded (`req.ips`, client first), each through `ipKeyGenerator`, which groups IPv6 addresses by /56, so one host can't step through its own subnet for fresh counters. Logs still don't record the address.
+   - Through the Vercel rewrite a request passes two proxies: Vercel's, then Render's. The app sees `X-Forwarded-For: visitor, Vercel`, so with 2 hops the key is "visitor, Vercel": each visitor has their own counters. With 1 hop it would be Vercel's address alone, shared by every visitor, so one visitor could lock all the others out of sign-in, sign-up and a demo role.
+   - Someone calling the Render URL directly can write anything before the address Render appends. With 2 hops that gives them a fresh key of their own each time, which leaves them only the email and role limits. It never gives them a visitor's counter, because the key ends with the address Render saw: theirs, not Vercel's. So a hop count that is too high only gives forgers fresh counters of their own, and one too low makes visitors share. `docs/deploy.md` §9 checks the deployed value.
 
 Implementation: `express-rate-limit` with a small Redis store (`lib/redisRateLimitStore.js`), a custom `keyGenerator` per tier, and `standardHeaders: 'draft-7'`. Every 429 response carries `Retry-After` and a human-readable message: _"Too many failed login attempts for this account. Try again in 12 minutes."_
 
 - **Why not `rate-limit-redis`:** routers create their limiters when they're imported, before Redis is connected. `rate-limit-redis` loads its scripts at that moment. Up to v6.0.1 it never retries, so every limiter would stay off. The fix is in v6.0.2, which was a day old when this was built. The custom store uses ioredis `defineCommand`, which loads its script on first use. It keeps the same `rl:{tier}:{key}` keys, so switching later is a drop-in change.
-- **Mounting:** the auth tiers go after `validate(Zod)`. The user tiers go after the auth middleware. A key generator with no email or `req.user` throws a 500 on purpose, rather than putting everyone on one shared counter.
+- **Mounting:** the auth tiers go after the input check. The user tiers go after the auth middleware. A key generator with no email, role or `req.user` throws a 500 on purpose, rather than putting everyone on one shared counter. An IP tier skips a request with no address (its connection already closed) for the same reason.
+- **When Redis is down,** the limiters and the code-email cap fail open (§10.2). Codes can't be stored then, so those routes answer 503 anyway.
 
-| Tier            | Key                | Limit                          | Notes                                                                                                                                                         |
-| --------------- | ------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `login`         | email              | 5 **failed** attempts / 15 min | `skipSuccessfulRequests: true`. Known risk: someone could deliberately lock out a victim's account; mitigated by the short window (OTP login is cool-to-have) |
-| `register`      | email              | 3 / hour                       |                                                                                                                                                               |
-| `otpSend`       | email              | 3 / 15 min **and** 10 / day    | Two limiters stacked                                                                                                                                          |
-| `otpVerify`     | email              | 10 / 15 min                    | Plus the per-OTP attempt cap (5)                                                                                                                              |
-| `demo`          | role               | 60 / 15 min                    | Judges share demo accounts, so the limit is generous                                                                                                          |
-| `general`       | userId             | 300 / 5 min                    | Applied to the whole authenticated router                                                                                                                     |
-| `bookingCreate` | userId             | 10 / hour                      | Discourages slot-spamming                                                                                                                                     |
-| `upload`        | userId             | 20 / hour                      | ID cards, condition photos, evidence                                                                                                                          |
-| `ai`            | userId plus global | **Hard quota** (§15.2)         | Custom middleware, not `express-rate-limit`                                                                                                                   |
+| Tier            | Key                | Limit                            | Notes                                                                                                                                                                                                                            |
+| --------------- | ------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `login`         | email              | 5 **failed** attempts / 15 min   | `skipSuccessfulRequests: true`; `403 EMAIL_NOT_VERIFIED` after the right password isn't a failure. Known risk: someone could deliberately lock out a victim's account; mitigated by the short window (OTP login is cool-to-have) |
+| `loginIp`       | IP                 | 100 **failed** attempts / 15 min | Stacked after `login`, counting the same failures. A sign-in it refuses isn't a failed attempt on the account                                                                                                                    |
+| `register`      | email              | 3 / hour                         |                                                                                                                                                                                                                                  |
+| `registerIp`    | IP                 | 100 / hour                       | Stacked after `register`: one address signing up email after email                                                                                                                                                               |
+| `otpSend`       | email              | 3 / 15 min **and** 10 / day      | Two limiters stacked. A code an unverified login emails counts too                                                                                                                                                               |
+| `otpSendIp`     | IP                 | 50 / day                         | Stacked last on `register` and `resend-otp`; a code an unverified login emails counts too. One network's share of the code-email cap                                                                                             |
+| `otpVerify`     | email              | 10 / 15 min                      | Plus the per-OTP attempt cap (5)                                                                                                                                                                                                 |
+| `demoIp`        | role and IP        | 60 / 15 min                      | Judges share demo accounts, so the limit is generous; one network can use up a role only for itself                                                                                                                              |
+| `demo`          | role               | 1000 / 15 min                    | Stacked after `demoIp`. Bounds the 7-day refresh sessions that demo logins from many addresses add to Redis                                                                                                                      |
+| code emails     | global             | 250 / any 24 hours               | Not `express-rate-limit`: a sliding window taken where a code is sent (point 4)                                                                                                                                                  |
+| `general`       | userId             | 300 / 5 min                      | Applied to the whole authenticated router, plus refresh and logout                                                                                                                                                               |
+| `bookingCreate` | userId             | 10 / hour                        | Discourages slot-spamming                                                                                                                                                                                                        |
+| `upload`        | userId             | 20 / hour                        | ID cards, condition photos, evidence                                                                                                                                                                                             |
+| `fileLink`      | userId             | 20 / 15 min                      | Signed links to private files: each costs a Cloudinary Admin API call from a shared quota                                                                                                                                        |
+| `ai`            | userId plus global | **Hard quota** (§15.2)           | Custom middleware, not `express-rate-limit`                                                                                                                                                                                      |
 
 ---
 
@@ -715,15 +758,15 @@ This is separate from application logs. App logs are for **engineers** and get r
 - **Action names follow `entity.verb`:**
   - `user.registered`, `verification.approved`, `verification.id_viewed`
   - `resource.created`, `resource.status_changed`
-  - `badge.granted`
+  - `badge.created`, `badge.requested`, `badge.granted`, `badge.rejected`
   - `booking.requested`, `booking.approved`, `booking.rejected`, `booking.waitlisted`, `booking.promoted`, `booking.cancelled`, `booking.checked_in`, `booking.checked_out`, `booking.completed`, `booking.flagged`, `booking.no_show`, `booking.overdue`
-  - `incident.created`, `incident.resolved`
+  - `incident.created`, `incident.commented`, `incident.resolved`
   - `user.suspended`
 - **Cool-to-have:** each entry stores `prevHash` and `hash = sha256(prevHash + canonicalJSON(entry))`, and `GET /audit/verify` proves nothing was altered.
 
 ### 13.3 Health
 
-`GET /health` returns `200 { status: "ok", mongo: "up", redis: "up", uptime }`. It returns `503` if Mongo is down. If only Redis is down it still returns 200 with `redis: "degraded"`, because the app can run without Redis (§10.2). The keep-alive pinger calls it.
+`GET /health` returns `200 { status: "ok", mongo: "up", redis: "up", uptime, requestId }`. It returns `503` with `status: "down", mongo: "down"` if Mongo is down. If only Redis is down it still returns 200 with `redis: "degraded"`, because the app can run without Redis (§10.2). The keep-alive pinger calls it.
 
 ---
 
@@ -817,20 +860,22 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 
 ## 16. Security and privacy
 
-| Area            | Measure                                                                                                                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transport       | HTTPS everywhere (Vercel and Render); HSTS through `helmet`                                                                                                                                       |
-| Headers         | `helmet()` defaults, plus `contentSecurityPolicy` tuned for Cloudinary image hosts on the client                                                                                                  |
-| CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_ORIGIN` with `credentials: true`                                                                                 |
-| Cookies         | Refresh cookie is `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`                                                                                                                          |
-| Secrets         | Live only in env; `.env.example` lists the variables; a Zod-validated config means the server refuses to boot with missing or invalid env                                                         |
-| Injection       | Zod plus `strictQuery: 'throw'`; no `$where` or raw string queries; HTML stripped from free text; React escapes output                                                                            |
-| Uploads         | Size and count caps, MIME and magic-byte check, Cloudinary stores the files (never our disk), random public IDs                                                                                   |
-| Least data      | Managers see a borrower's name, member type, department and history with _their own_ unit, never email-derived roll numbers or ID images; availability endpoints show "busy" blocks with no names |
-| ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision                                                                                       |
-| Human oversight | Rejections, waitlisting, cancellations by managers, incident outcomes and suspensions all need a human actor plus a written reason; strikes only _suggest_ suspension to an admin                 |
-| Demo data       | All fictional; seeded accounts on a `.test` domain; no real NIT JSR personal data                                                                                                                 |
-| Third-party AI  | Free-tier caveat disclosed; no PII sent (§15.3)                                                                                                                                                   |
+| Area            | Measure                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Transport       | HTTPS everywhere (Vercel and Render); HSTS through `helmet`                                                                                                                                                                                                                                                                                                                                                                                            |
+| Headers         | `helmet()` defaults, plus `contentSecurityPolicy` tuned for Cloudinary image hosts on the client                                                                                                                                                                                                                                                                                                                                                       |
+| CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_URL` with `credentials: true`                                                                                                                                                                                                                                                                                                                                         |
+| Cookies         | Refresh cookie is `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`                                                                                                                                                                                                                                                                                                                                                                               |
+| Proxy           | `trust proxy` is a hop count (`TRUST_PROXY_HOPS`: 1, Render's proxy, by default; 2 behind Vercel), never `true`. The IP ceilings key on every forwarded address, ending with the one Render's proxy saw, so a client can't land on someone else's counter with `X-Forwarded-For` (§11)                                                                                                                                                                 |
+| Abuse           | Rate limits per user, email and demo role, with coarse per-IP ceilings stacked on the public auth routes and a global cap on code emails (§11)                                                                                                                                                                                                                                                                                                         |
+| Secrets         | Live only in env; `.env.example` lists the variables. `config/env.js` checks them at boot: in production a missing `MONGODB_URI`, `REDIS_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `OTP_PEPPER` or `CLIENT_URL`, or a secret under 32 characters, is logged and the process exits 1 before connecting anything; elsewhere these only warn. Missing Cloudinary or SMTP settings always only warn. Messages name settings, never their values |
+| Injection       | Zod plus `strictQuery: 'throw'`; no `$where` or raw string queries; HTML stripped from free text; React escapes output                                                                                                                                                                                                                                                                                                                                 |
+| Uploads         | Size and count caps, MIME and magic-byte check, Cloudinary stores the files (never our disk), random public IDs                                                                                                                                                                                                                                                                                                                                        |
+| Least data      | Managers see a borrower's name, member type, department and history with _their own_ unit, never email-derived roll numbers or ID images; availability endpoints show "busy" blocks with no names                                                                                                                                                                                                                                                      |
+| ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision                                                                                                                                                                                                                                                                                                                                            |
+| Human oversight | Rejections, waitlisting, cancellations by managers, incident outcomes and suspensions all need a human actor plus a written reason; strikes only _suggest_ suspension to an admin                                                                                                                                                                                                                                                                      |
+| Demo data       | All fictional; seeded accounts on a `.test` domain; no real NIT JSR personal data. The public demo admin can only see and review demo accounts, never real users' ID cards. Elsewhere the one-click demo admin and manager act as real staff, so the server warns at boot when `DEMO_MODE=true` and accounts outside the demo domain exist: run a deployment demo-only, or with `DEMO_MODE` off                                                        |
+| Third-party AI  | Free-tier caveat disclosed; no PII sent (§15.3)                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ---
 
@@ -857,22 +902,23 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 
 ## 18. Deployment
 
-| Component    | Service (free tier)                                                         | Notes                                                                                                        |
-| ------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Frontend     | **Vercel**                                                                  | `vercel.json` rewrite `/api/(.*)` → `https://<render-app>.onrender.com/api/$1`; SPA fallback to `index.html` |
-| API and cron | **Render** web service                                                      | Node 22; `npm start`; health check path `/health`                                                            |
-| Database     | **MongoDB Atlas M0**                                                        | Replica set (transactions available); allow-list Render's egress                                             |
-| Redis        | **Upstash** (TCP via ioredis) or **Redis Cloud** 30 MB                      | Upstash is fine for the MVP; use Redis Cloud or Render Key Value once BullMQ is added                        |
-| Files        | **Cloudinary**                                                              | `authenticated` type for ID cards                                                                            |
-| Email        | **Gmail SMTP** (app password, about 500 per day) or **Brevo** (300 per day) | Through Nodemailer                                                                                           |
-| Keep-alive   | **cron-job.org**                                                            | `GET /health` every 10 min during judging                                                                    |
+| Component    | Service (free tier)                                                         | Notes                                                                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend     | **Vercel**                                                                  | `vercel.json` rewrite `/api/(.*)` → `https://<render-app>.onrender.com/api/$1`; SPA fallback to `index.html`                                                                                      |
+| API and cron | **Render** web service                                                      | Node 20 or later (`engines` in `package.json`; `file-type` 21 needs 20); `npm start`; health check path `/health`. Behind Vercel's rewrite and Render's proxy: two hops (`TRUST_PROXY_HOPS`, §11) |
+| Database     | **MongoDB Atlas M0**                                                        | Replica set (transactions available); allow-list Render's egress                                                                                                                                  |
+| Redis        | **Upstash** (TCP via ioredis) or **Redis Cloud** 30 MB                      | Upstash is fine for the MVP; use Redis Cloud or Render Key Value once BullMQ is added                                                                                                             |
+| Files        | **Cloudinary**                                                              | `authenticated` type for ID cards                                                                                                                                                                 |
+| Email        | **Gmail SMTP** (app password, about 500 per day) or **Brevo** (300 per day) | Through Nodemailer                                                                                                                                                                                |
+| Keep-alive   | **cron-job.org**                                                            | `GET /health` every 10 min during judging                                                                                                                                                         |
 
-**Environment variables (server):**
+**Environment variables (server).** In production the server refuses to start without `MONGODB_URI`, `REDIS_URL`, `CLIENT_URL` and the three secrets (each at least 32 characters); see §16 "Secrets".
 
 ```
-NODE_ENV, PORT, LOG_LEVEL, CLIENT_ORIGIN
+NODE_ENV, PORT, LOG_LEVEL, CLIENT_URL
+TRUST_PROXY_HOPS=2           # proxies in front of the app: 2 behind Vercel, default 1 (§11)
 MONGODB_URI, REDIS_URL
-JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, OTP_PEPPER
+ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, OTP_PEPPER, SEED_PASSWORD
 ALLOWED_EMAIL_DOMAINS=nitjsr.ac.in
 DEMO_MODE=true
 CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
@@ -910,14 +956,15 @@ WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID
 
 ## 20. Risks and known limitations
 
-| Risk / limitation                                                                  | Mitigation                                                                                            |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Free-tier cold starts during judging                                               | Keep-alive pinger; consider Render's starter plan for the judging window                              |
-| Cron runs in-process (single instance; missed if asleep)                           | Redis sweep lock, read-time `isOverdue` derivation, BullMQ upgrade path                               |
-| Notifications rely on polling (30 s), not real time                                | Acceptable for the MVP; Socket.io is cool-to-have                                                     |
-| Email deliverability and quota (Gmail about 500 per day)                           | Only key events send email; in-app notifications are the source of truth                              |
-| Gemini free-tier limits are unclear and may change                                 | Every limit in env, a circuit breaker, a non-AI fallback for each AI feature                          |
-| The email regex may not cover every historic format (e.g. older `name.13ugcs043@`) | Hints only; humans verify ID cards; unknown formats fall back to manual selection                     |
-| ID verification is manual (admin workload)                                         | Cool-to-have: in-browser OCR pre-check; later, delegate to department managers                        |
-| No payments or deposits                                                            | Out of scope; deposit credits are a P3 idea                                                           |
-| Single-campus scope                                                                | Deliberate. `ALLOWED_EMAIL_DOMAINS` and OrgUnits make adding more institutions a configuration change |
+| Risk / limitation                                                                   | Mitigation                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Free-tier cold starts during judging                                                | Keep-alive pinger; consider Render's starter plan for the judging window                                                                                                                                                                                                                                     |
+| Cron runs in-process (single instance; missed if asleep)                            | Redis sweep lock, read-time `isOverdue` derivation, BullMQ upgrade path                                                                                                                                                                                                                                      |
+| Notifications rely on polling (30 s), not real time                                 | Acceptable for the MVP; Socket.io is cool-to-have                                                                                                                                                                                                                                                            |
+| Email deliverability and quota (Gmail about 500 per day)                            | Only key events send email; in-app notifications are the source of truth. Code emails are capped at 250 in any 24 hours (§11), 50 per network, so abuse gets a clear 503 rather than a suspended SMTP account. A caller of the Render URL who forges `X-Forwarded-For` can still use the cap up for everyone |
+| Gemini free-tier limits are unclear and may change                                  | Every limit in env, a circuit breaker, a non-AI fallback for each AI feature                                                                                                                                                                                                                                 |
+| The email regex may not cover every historic format (e.g. older `name.13ugcs043@`)  | Hints only; humans verify ID cards; unknown formats fall back to manual selection                                                                                                                                                                                                                            |
+| ID verification is manual (admin workload)                                          | Cool-to-have: in-browser OCR pre-check; later, delegate to department managers                                                                                                                                                                                                                               |
+| No payments or deposits                                                             | Out of scope; deposit credits are a P3 idea                                                                                                                                                                                                                                                                  |
+| Single-campus scope                                                                 | Deliberate. `ALLOWED_EMAIL_DOMAINS` and OrgUnits make adding more institutions a configuration change                                                                                                                                                                                                        |
+| Coarse IP ceilings on the auth routes can still trip for a whole hostel under abuse | Generous limits (100 an hour or per 15 minutes), always stacked on the email or role key. Behind the Vercel rewrite `TRUST_PROXY_HOPS` must be at least 2, or every visitor shares them (§11, `docs/deploy.md` §6, §9)                                                                                       |

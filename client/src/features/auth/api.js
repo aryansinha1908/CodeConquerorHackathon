@@ -1,153 +1,60 @@
-import http from '../../lib/http';
-import { useAuthStore } from '../../stores/auth';
+import http, { refreshSession } from '../../lib/http';
 
-export const DEMO_USERS = {
-  student: {
-    _id: 'user-stu-1',
-    name: 'Aman Sharma',
-    email: '2024ugcs042@nitjsr.ac.in',
-    role: 'member',
-    roles: ['member'],
-    memberType: 'UG',
-    department: { code: 'CSE', name: 'Computer Science & Engineering' },
-    verification: { status: 'approved', submittedAt: '2026-10-25T10:00:00.000Z' },
-  },
-  student2: {
-    _id: 'user-stu-2',
-    name: 'Sneha Patel',
-    email: '2023ugme018@nitjsr.ac.in',
-    role: 'member',
-    roles: ['member'],
-    memberType: 'UG',
-    department: { code: 'ME', name: 'Mechanical Engineering' },
-    verification: { status: 'pending', submittedAt: '2026-10-28T09:00:00.000Z' },
-  },
-  faculty: {
-    _id: 'user-fac-1',
-    name: 'Dr. A. Verma',
-    email: 'averma.ece@nitjsr.ac.in',
-    role: 'member',
-    roles: ['member'],
-    memberType: 'FACULTY',
-    department: { code: 'ECE', name: 'Electronics & Communication' },
-    verification: { status: 'approved', submittedAt: '2026-10-20T10:00:00.000Z' },
-  },
-  manager: {
-    _id: 'user-mgr-1',
-    name: 'Dr. R. Singh (DIC Manager)',
-    email: 'dic.manager@nitjsr.ac.in',
-    role: 'manager',
-    roles: ['manager', 'member'],
-    memberType: 'FACULTY',
-    department: { code: 'DIC', name: 'Design Innovation Centre' },
-    verification: { status: 'approved', submittedAt: '2026-10-15T10:00:00.000Z' },
-    managedOrgUnits: ['org-dic', 'org-ws'],
-  },
-  admin: {
-    _id: 'user-adm-1',
-    name: 'Prof. K. Sharma (Administrator)',
-    email: 'admin@nitjsr.ac.in',
-    role: 'admin',
-    roles: ['admin', 'manager', 'member'],
-    memberType: 'STAFF',
-    department: { code: 'ADMIN', name: 'Central Administration' },
-    verification: { status: 'approved', submittedAt: '2026-10-01T10:00:00.000Z' },
-  },
-};
+// Every function resolves with the success envelope { success, data, requestId } and rejects with
+// the normalised error from lib/http.js: { status, code, message, details, retryAfter, requestId }.
 
-/** POST /auth/register */
+/** POST /auth/register → data { email, otpSent } */
 export async function register(data) {
   const res = await http.post('/auth/register', data);
   return res.data;
 }
 
-/** POST /auth/verify-otp */
+/** POST /auth/verify-otp → data { accessToken, user } */
 export async function verifyOtp(data) {
   const res = await http.post('/auth/verify-otp', data);
   return res.data;
 }
 
-/** POST /auth/resend-otp */
+/** POST /auth/resend-otp → data { sent, retryAfter } */
 export async function resendOtp(data) {
   const res = await http.post('/auth/resend-otp', data);
   return res.data;
 }
 
-/** POST /auth/login */
+/** POST /auth/login → data { accessToken, user } */
 export async function login(data) {
   const res = await http.post('/auth/login', data);
   return res.data;
 }
 
-/** POST /auth/logout */
+/** POST /auth/logout → data { loggedOut } (always 200; the cookie is enough) */
 export async function logout() {
-  try {
-    const res = await http.post('/auth/logout');
-    return res.data;
-  } catch (err) {
-    return { status: 'success' };
-  }
+  const res = await http.post('/auth/logout');
+  return res.data;
 }
 
-/** POST /auth/refresh */
-export async function refreshToken() {
-  try {
-    const res = await http.post('/auth/refresh');
-    return res.data;
-  } catch (err) {
-    const currToken = useAuthStore.getState().accessToken;
-    if (currToken) {
-      return { status: 'success', data: { accessToken: currToken } };
-    }
-    throw err;
-  }
+/**
+ * POST /auth/refresh → data { accessToken, user }, already stored. Single-flight: the cookie
+ * rotates on every refresh, so a second parallel call would look like token reuse to the server.
+ */
+export function refreshToken() {
+  return refreshSession();
 }
 
-/** GET /auth/me */
+/** GET /auth/me → data = user view */
 export async function getMe() {
-  try {
-    const res = await http.get('/auth/me');
-    return res.data;
-  } catch (err) {
-    const currUser = useAuthStore.getState().user;
-    if (currUser) {
-      return { status: 'success', data: currUser };
-    }
-    throw err;
-  }
+  const res = await http.get('/auth/me');
+  return res.data;
 }
 
-/** GET /auth/demo-config – returns { demoMode: boolean, roles: [] } */
+/** GET /auth/demo-config → data { demoMode, roles } */
 export async function getDemoConfig() {
-  try {
-    const res = await http.get('/auth/demo-config');
-    return res.data;
-  } catch (err) {
-    // Enable demo switcher so hackathon reviewers and developers can test roles offline
-    return {
-      status: 'success',
-      data: {
-        demoMode: true,
-        roles: ['student', 'student2', 'faculty', 'manager', 'admin'],
-      },
-    };
-  }
+  const res = await http.get('/auth/demo-config');
+  return res.data;
 }
 
-/** POST /auth/demo-login */
+/** POST /auth/demo-login → data { accessToken, user } */
 export async function demoLogin(role) {
-  try {
-    const res = await http.post('/auth/demo-login', { role });
-    return res.data;
-  } catch (err) {
-    const user = DEMO_USERS[role] || DEMO_USERS.admin;
-    const token = `demo-token-${role}-${Date.now()}`;
-    return {
-      status: 'success',
-      data: {
-        accessToken: token,
-        user,
-      },
-    };
-  }
+  const res = await http.post('/auth/demo-login', { role });
+  return res.data;
 }
