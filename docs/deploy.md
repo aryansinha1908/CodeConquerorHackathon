@@ -99,6 +99,7 @@ Keep the values you collect in a password manager, or in `server/.env.production
 ## 3. Cloudinary
 
 - [ ] Sign in → **Settings** → **API Keys** → **Generate New API Key**. A key used only by this deployment can be revoked without touching anything else.
+  - **The key must be allowed to upload.** A key with restricted permissions passes Cloudinary's read-only checks but refuses every upload with `403 Request forbidden due to missing permissions (actions=["create"])`. The API then answers 503 "Uploads aren't available right now.", and Render's log says `Cloudinary refused the upload (HTTP 403)`. Give the key full (or upload and delete) permissions, or use the account's default key.
 - [ ] Copy the **cloud name** (top of the API Keys page or the dashboard), the **API key** and the **API secret**.
 - [ ] Nothing else to configure. Condition photos are public (`upload` type). ID cards and badge evidence are `authenticated`, and open only through 5-minute signed links from Cloudinary's Download API on `api.cloudinary.com`, which the Vercel CSP allows. If a PDF of badge evidence won't open, check **Settings → Security → "Allow delivery of PDF and ZIP files"**.
 

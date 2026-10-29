@@ -386,6 +386,27 @@ describe("storeFiles", () => {
       { path: "idCard", message: "This file couldn't be read. Is it damaged?" },
     ]);
   });
+
+  test("Cloudinary refusing the key (401/403) is still a 503, but logged as an error that says to check the key", async () => {
+    for (const http_code of [401, 403]) {
+      logged.length = 0;
+      useUploader(
+        fakeUploader({
+          failOn: { 0: { message: `Server returned unexpected status code - ${http_code}`, http_code } },
+        }),
+      );
+      const err = await refusal(storeFiles([file(PNG)], "id-cards", { field: "idCard" }));
+      assert.equal(err.status, 503);
+      assert.equal(err.code, "SERVICE_UNAVAILABLE");
+      // "Try again in a minute" would be wrong: retrying never fixes a key without upload rights.
+      assert.equal(err.message, "Uploads aren't available right now.");
+      const [level, , message] = logged.find(([, , m]) => /Cloudinary refused/.test(m ?? "")) ?? [];
+      assert.equal(level, "error", `http ${http_code}`);
+      assert.match(message, new RegExp(`HTTP ${http_code}`));
+      assert.match(message, /CLOUDINARY_API_KEY/);
+      assert.match(message, /upload/i);
+    }
+  });
 });
 
 describe("signedUrl and discardAsset", () => {
