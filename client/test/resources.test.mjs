@@ -1258,6 +1258,13 @@ test('ResourceDetailPage renders the header, rules, server checklist, quota, the
   const t = text(html);
   assert.equal((html.match(/<h1/g) ?? []).length, 1);
   assert.match(html, /<h1[^>]*>FDM 3D Printer<\/h1>/);
+  // The rules column sticks without a height cap or a scrollbar of its own (a capped column cut the
+  // handover checklist off): taller than the screen, its top goes negative so the page scroll
+  // reaches every card.
+  const rules = html.match(/<div class="[^"]*lg:sticky[^"]*"[^>]*>/)?.[0];
+  assert.ok(rules, 'the sticky rules column');
+  assert.match(rules, /top:min\(6rem, calc\(100vh - var\(--rules-height, 0px\) - 1\.5rem\)\)/);
+  assert.doesNotMatch(rules, /overflow-y-auto|max-h-/);
   assert.match(t, /Design and Innovation Centre \(DIC\)/);
   assert.match(t, /Prototyping Lab, Design and Innovation Centre \(Ground floor\)/);
   assert.match(t, /Medium risk/);

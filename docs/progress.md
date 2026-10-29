@@ -307,7 +307,7 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
      - The bell's "See all" was white on white: `cn()` only joins strings, so `bg-white` and the green were on one element. Each footer action now has one background.
      - Explore's filter box grew when a filter came on: "Clear filters" is now always rendered (hidden and inert with no filters).
      - Explore cards are clickable as a whole: one stretched title link.
-     - The resource page's left column (rules, who can book, limits, checklist) is sticky with its own scroll.
+     - The resource page's left column (rules, who can book, limits, checklist) is sticky. It first had a height cap and its own scrollbar, which cut the handover checklist off. Now it has no cap and no inner scroll: it sticks below the header when it fits, and when it's taller its `top` goes negative (`min(6rem, 100vh − its height − 1.5rem)`, with the height kept in a CSS variable). It scrolls with the page until its last card is in view, then stays.
      - A global `:focus-visible` rule ringed whole menus; menus are exempt now.
    - **framer-motion:** presets in `lib/motion.js`, `StaggerList` / `StaggerItem` / `FadeUp` in `components/Motion.jsx`. Where:
      - page entrance (in `LazyPage`);

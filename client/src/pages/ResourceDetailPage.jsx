@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowDown,
@@ -358,8 +358,31 @@ function BookingArea({ resource }) {
   );
 }
 
+// Where the sticky rules column stops (lg and up; `top` does nothing on the stacked layout). It
+// sticks 6rem down, below the header, when it fits on the screen. When it is taller, a 6rem top
+// would leave its last cards below the bottom edge for good, so its top goes negative instead: the
+// column scrolls with the page until its bottom card is 1.5rem above the bottom edge, then stays
+// there. Nothing is cut off, and there is no second scrollbar inside the page.
+const STICKY_TOP = 'min(6rem, calc(100vh - var(--rules-height, 0px) - 1.5rem))';
+
+/** Keeps --rules-height on the element at its current height (cards, fonts and widths change it). */
+function useHeightVar(ref) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const update = () => el.style.setProperty('--rules-height', `${el.offsetHeight}px`);
+    update();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+}
+
 /** The page body for a loaded resource (the Detail of GET /resources/:id). Exported for the tests. */
 export function ResourceDetail({ resource }) {
+  const rulesRef = useRef(null);
+  useHeightVar(rulesRef);
   const limits = limitsList(resource.limits);
   const checklist = Array.isArray(resource.checklist) ? resource.checklist.filter(Boolean) : [];
   return (
@@ -376,15 +399,13 @@ export function ResourceDetail({ resource }) {
       </FadeUp>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* The rules stay in view while the booking side scrolls: sticky below the header from lg.
-            At most the screen less the header above and the footer's share below (15rem), so even
-            at the end of the page, where the grid stops, the whole column stays below the header;
-            taller content scrolls inside it. The padding keeps the cards' offset shadows inside
-            that scroll box. */}
+        {/* The rules stay in view while the booking side scrolls: sticky from lg, at STICKY_TOP. */}
         <StaggerList
           as="div"
+          ref={rulesRef}
           step={0.06}
-          className="lg:col-span-5 space-y-6 lg:sticky lg:top-24 lg:max-h-[calc(100vh-15rem)] lg:overflow-y-auto lg:pr-2 lg:pb-2 [scrollbar-width:thin] [scrollbar-color:#1a1a1a66_transparent]"
+          style={{ top: STICKY_TOP }}
+          className="lg:col-span-5 space-y-6 lg:sticky"
         >
           <SectionCard icon={ScrollText} title="Usage rules">
             {resource.usageRules ? (
