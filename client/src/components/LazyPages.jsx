@@ -1,4 +1,6 @@
 import React, { lazy as reactLazy, Suspense } from 'react';
+import { motion } from 'framer-motion';
+import { enter, fadeUp } from '../lib/motion';
 import { withStaleChunkReload } from '../lib/staleChunk';
 
 // The code-split pages of app/router.jsx. They live here, in a file that exports only components,
@@ -30,6 +32,7 @@ export const IncidentDetailPage = lazy(() => import('../features/incidents/Incid
 export const IncidentListPage = lazy(() => import('../features/incidents/IncidentListPage'));
 export const AuditPage = lazy(() => import('../features/admin/AuditPage'));
 export const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
+export const ProfilePage = lazy(() => import('../features/profile/ProfilePage'));
 // /badges is the teammate's: their page replaces this line's import when it lands.
 export const BadgesPage = lazy(() =>
   import('../pages/Placeholders').then((module) => ({ default: module.BadgesPlaceholder }))
@@ -40,6 +43,10 @@ export const BadgesPage = lazy(() =>
 // chunk. AppLayout shows a look-alike button (BellFallback) while it loads.
 export const NotificationBell = lazy(() =>
   import('./NotificationBell').then((module) => ({ default: module.NotificationBell }))
+);
+// The header's account menu, for the same reason (AppLayout shows UserMenuFallback meanwhile).
+export const UserMenu = lazy(() =>
+  import('./UserMenu').then((module) => ({ default: module.UserMenu }))
 );
 
 export function PageFallback() {
@@ -54,7 +61,17 @@ export function PageFallback() {
   );
 }
 
-/** A lazy page inside the shared loading fallback. */
+/**
+ * A lazy page inside the shared loading fallback. The page rises in once its code has loaded: the
+ * wrapper mounts with the page (a suspended render isn't committed), and each route has its own
+ * LazyPage (app/router.jsx), so a navigation animates the new page and nothing else remounts.
+ */
 export function LazyPage({ children }) {
-  return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <motion.div variants={fadeUp} {...enter}>
+        {children}
+      </motion.div>
+    </Suspense>
+  );
 }

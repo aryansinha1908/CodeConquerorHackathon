@@ -12,6 +12,7 @@ import { BookingCard } from './components/BookingCard';
 import { TAB_EMPTY, readTab } from './components/bookingView';
 import { eyebrowClass, linkButtonClass, pageHeadingClass } from './components/styles';
 import { useNow } from './components/useClock';
+import { StaggerList } from '../../components/Motion';
 
 // /bookings (frontend.md §6.2): tabs Upcoming (approved, checked_in) · Requests (pending,
 // waitlisted with the place in line) · Past (the rest), each one GET /bookings/mine with its
@@ -203,11 +204,11 @@ export default function MyBookingsPage() {
                 retrying={list.isFetching}
               />
             )}
-            <ul className={cn('space-y-4', list.isPlaceholderData && 'opacity-60')}>
+            <StaggerList className={cn('space-y-4 transition-opacity', list.isPlaceholderData && 'opacity-60')}>
               {items.map((booking) => (
                 <BookingCard key={booking._id} booking={booking} now={now} />
               ))}
-            </ul>
+            </StaggerList>
           </>
         )}
 

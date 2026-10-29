@@ -20,6 +20,7 @@ const vendorGroups = [
   { name: 'headlessui', test: inPackages('@headlessui'), priority: 40 },
   { name: 'date-fns', test: inPackages('date-fns|date-fns-tz'), priority: 40 },
   { name: 'icons', test: inPackages('lucide-react'), priority: 40 },
+  { name: 'motion', test: inPackages('framer-motion|motion-dom|motion-utils'), priority: 40 },
   { name: 'forms', test: inPackages(String.raw`zod|react-hook-form|@hookform[\\/]resolvers`), priority: 30 },
   // What every page loads besides (axios, sonner, zustand…). '$initial': only the libraries the
   // entry imports statically, so a library only some lazy page needs stays with that page.

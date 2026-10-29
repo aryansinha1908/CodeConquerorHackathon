@@ -5,6 +5,7 @@ import { ErrorState } from '../../../components/ui/ErrorState';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { cn } from '../../../lib/utils';
 import { totalOf } from './counts';
+import { StaggerItem } from '../../../components/Motion';
 
 /**
  * One dashboard count (frontend.md §6.3): the number of items waiting in a list, as a link to that
@@ -20,7 +21,7 @@ export function CountCard({ id, to, title, description, icon: Icon, query, noun,
   const attention = typeof count === 'number' && count > 0;
 
   return (
-    <li className="flex flex-col gap-2 min-w-0">
+    <StaggerItem className="flex flex-col gap-2 min-w-0">
       <Link
         to={to}
         aria-labelledby={headingId}
@@ -77,6 +78,6 @@ export function CountCard({ id, to, title, description, icon: Icon, query, noun,
           className="text-xs"
         />
       )}
-    </li>
+    </StaggerItem>
   );
 }

@@ -35,6 +35,23 @@ describe("startSweeper", () => {
     assert.equal(startSweeper({ runNow: false }), null);
   });
 
+  test("stopSweeper waits for a sweep already running, so shutdown doesn't close the databases under it", async () => {
+    let finish;
+    const running = new Promise((resolve) => {
+      finish = resolve;
+    });
+    startSweeper({ runNow: true, run: () => running });
+    let stopped = false;
+    const stopping = stopSweeper().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(stopped, false, "still waiting for the sweep");
+    finish({ skipped: false, counts: {} });
+    await stopping;
+    assert.equal(stopped, true);
+  });
+
   test("stopSweeper destroys the task so a new one can start", async () => {
     const first = startSweeper({ runNow: false });
     await stopSweeper();

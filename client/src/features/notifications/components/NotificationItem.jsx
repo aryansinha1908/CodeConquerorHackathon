@@ -5,6 +5,7 @@ import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { cn } from '../../../lib/utils';
 import { notificationView } from './notificationView';
+import { StaggerItem } from '../../../components/Motion';
 
 const linkClass =
   'inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-md border-2 border-[#1a1a1a] bg-[#183d2d] ' +
@@ -33,7 +34,7 @@ export function NotificationItem({ notification, onMarkRead, now }) {
   };
 
   return (
-    <li>
+    <StaggerItem>
       <article
         ref={rowRef}
         tabIndex={-1}
@@ -106,6 +107,6 @@ export function NotificationItem({ notification, onMarkRead, now }) {
           )}
         </div>
       </article>
-    </li>
+    </StaggerItem>
   );
 }

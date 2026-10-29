@@ -29,6 +29,7 @@ import {
   LazyPage,
   MyBookingsPage,
   NotificationsPage,
+  ProfilePage,
   ReportIncidentPage,
   RequestsPage,
   ResourceDetailPage,
@@ -108,6 +109,8 @@ export const router = createBrowserRouter([
       { path: '/incidents/new', element: page(<ReportIncidentPage />) },
       { path: '/incidents/:id', element: page(<IncidentDetailPage />) },
       { path: '/notifications', element: page(<NotificationsPage />) },
+      // The account menu's Profile (frontend.md §6.2): details, verification, badges, consoles.
+      { path: '/profile', element: page(<ProfilePage />) },
 
       // ── Manager sub-routes ────────────────────────────────────────────────
       {

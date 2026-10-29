@@ -6,6 +6,7 @@ import { isAdmin } from './components/manageView';
 import { useNow } from './components/useNow';
 import { CountCard } from './dashboard/CountCard';
 import { useDashboardCounts } from './dashboard/counts';
+import { StaggerList } from '../../components/Motion';
 
 // /manage (frontend.md §6.3): what is waiting for the manager, as count cards that each link to
 // the page where it is worked. Every count is the meta.total of a limit=1 page of that page's own
@@ -97,11 +98,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <ul aria-label="What needs you" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <StaggerList step={0.06} aria-label="What needs you" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {cards.map((card) => (
           <CountCard key={card.id} {...card} />
         ))}
-      </ul>
+      </StaggerList>
     </section>
   );
 }

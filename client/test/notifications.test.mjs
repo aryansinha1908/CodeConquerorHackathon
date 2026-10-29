@@ -530,6 +530,20 @@ test('BellPanel: the latest 5 as menu items, then "Mark all read" and "See all"'
   assert.match(html, /<a[^>]*href="\/notifications"[^>]*>See all/);
 });
 
+test('BellPanel: "See all" is white on green, with no white background class fighting it', async () => {
+  signIn(MEMBER);
+  const { notificationKeys } = await api();
+  const html = await renderPanel(
+    { unread: 1 },
+    { cache: [[notificationKeys.list({ page: 1, limit: 5 }), listAnswer([UNREAD], { limit: 5 })]] },
+  );
+  const seeAll = html.match(/<a[^>]*href="\/notifications"[^>]*>/)[0];
+  const classes = seeAll.match(/class="([^"]*)"/)[1].split(/\s+/);
+  assert.ok(classes.includes('bg-[#183d2d]') && classes.includes('text-white'), seeAll);
+  // cn() only joins strings: a second background would leave the colour to the stylesheet's order.
+  assert.deepEqual(classes.filter((c) => /^bg-/.test(c)), ['bg-[#183d2d]']);
+});
+
 test('BellPanel: "Mark all read" is disabled with nothing unread; loading, empty and failed states', async () => {
   signIn(MEMBER);
   const { notificationKeys } = await api();
@@ -563,7 +577,25 @@ test('AppLayout puts the bell in the header', async () => {
   });
   const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
   assert.match(header, /aria-label="Notifications, 2 unread"/);
-  assert.ok(header.indexOf('Notifications, 2 unread') < header.indexOf('aria-label="Logout"'), 'before Logout');
+  // The account button's stand-in (UserMenu is lazy, so a server render shows its fallback).
+  assert.ok(header.includes('aria-label="Account: Aarav Student"'), 'the account button');
+  assert.ok(header.indexOf('Notifications, 2 unread') < header.indexOf('aria-label="Account: '), 'before the account button');
+});
+
+test('AppLayout: the main nav holds the sections; verification and the admin console are in the account menu', async () => {
+  const { AppLayout } = await load('/src/app/layouts/AppLayout.jsx');
+  const navOf = (html) => html.slice(html.indexOf('<nav aria-label="Main"'), html.indexOf('</nav>'));
+
+  signIn(MEMBER);
+  const member = navOf(await render((React) => React.createElement(AppLayout), { path: '/explore' }));
+  for (const href of ['/explore', '/bookings', '/badges']) assert.match(member, new RegExp(`href="${href}"`));
+  for (const href of ['/manage', '/admin', '/verification']) assert.doesNotMatch(member, new RegExp(`href="${href}"`));
+
+  signIn({ ...MEMBER, roles: ['member', 'admin'] });
+  const admin = navOf(await render((React) => React.createElement(AppLayout), { path: '/explore' }));
+  assert.match(admin, /href="\/manage"/);
+  assert.doesNotMatch(admin, /href="\/admin"/);
+  assert.doesNotMatch(admin, /href="\/verification"/);
 });
 
 test("the bell's stand-in while its code loads: the same label and count, but nothing to tab to or press", async () => {

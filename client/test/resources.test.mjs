@@ -747,6 +747,11 @@ test('ResourceCard shows unit, risk, approval, badges, the formatted location an
   assert.doesNotMatch(t, /\[object Object\]/);
   assert.match(html, new RegExp(`href="/resources/${RESOURCE_ID}"`));
   assert.doesNotMatch(html, /<a[^>]*>[^<]*<button/, 'no button inside a link');
+  // The whole card opens the resource: one link, the title, stretched over the card; "View and
+  // book" only looks like a button, so a screen reader or Tab meets the card once.
+  assert.equal((html.match(/<a\b/g) ?? []).length, 1, 'one link per card');
+  assert.match(html, /<a[^>]*class="[^"]*after:absolute after:inset-0[^"]*"[^>]*>FDM 3D Printer<\/a>/);
+  assert.match(html, /<span[^>]*aria-hidden="true"[^>]*>View and book/);
 
   const loan = text(
     await render((React) =>
@@ -1149,6 +1154,27 @@ test('ExplorePage renders the grid from GET /resources, the units from GET /org-
   assert.match(text(paged), /Page 2 of 3/);
 });
 
+test('ResourceFilters keeps "Clear filters" in place, invisible and hidden until a filter is on, so the box never grows', async () => {
+  const { ResourceFilters } = await load('/src/features/resources/components/ResourceFilters.jsx');
+  const filters = { q: '', category: '', orgUnit: '', eligibleOnly: false, page: 1 };
+  const clearButton = (html) => html.match(/<button[^>]*>Clear filters<\/button>/)?.[0];
+
+  const none = clearButton(await render((React) => React.createElement(ResourceFilters, { filters, onChange() {}, hasFilters: false })));
+  assert.ok(none, 'rendered with no filters');
+  assert.match(none, /aria-hidden="true"/);
+  // visibility: hidden keeps it out of the tab order and the pointer's reach. Not `disabled`, whose
+  // Button style (disabled:opacity-50) would fight opacity-0.
+  assert.match(none, /class="[^"]*\binvisible\b[^"]*"/);
+  assert.doesNotMatch(none, /disabled=""/);
+
+  const some = clearButton(
+    await render((React) =>
+      React.createElement(ResourceFilters, { filters: { ...filters, category: 'equipment' }, onChange() {}, hasFilters: true }),
+    ),
+  );
+  assert.doesNotMatch(some, /aria-hidden|disabled=""|\binvisible\b/);
+});
+
 test('ExplorePage shows the empty state, and the error with its request id and a retry', async () => {
   const { default: ExplorePage } = await load('/src/pages/ExplorePage.jsx');
   const { resourceKeys } = await api();
@@ -1232,6 +1258,13 @@ test('ResourceDetailPage renders the header, rules, server checklist, quota, the
   const t = text(html);
   assert.equal((html.match(/<h1/g) ?? []).length, 1);
   assert.match(html, /<h1[^>]*>FDM 3D Printer<\/h1>/);
+  // The rules column sticks without a height cap or a scrollbar of its own (a capped column cut the
+  // handover checklist off): taller than the screen, its top goes negative so the page scroll
+  // reaches every card.
+  const rules = html.match(/<div class="[^"]*lg:sticky[^"]*"[^>]*>/)?.[0];
+  assert.ok(rules, 'the sticky rules column');
+  assert.match(rules, /top:min\(6rem, calc\(100vh - var\(--rules-height, 0px\) - 1\.5rem\)\)/);
+  assert.doesNotMatch(rules, /overflow-y-auto|max-h-/);
   assert.match(t, /Design and Innovation Centre \(DIC\)/);
   assert.match(t, /Prototyping Lab, Design and Innovation Centre \(Ground floor\)/);
   assert.match(t, /Medium risk/);

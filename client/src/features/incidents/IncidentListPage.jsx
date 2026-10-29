@@ -16,6 +16,7 @@ import {
 } from './api';
 import { IncidentCard } from './components/IncidentCard';
 import { IncidentFilters } from './components/IncidentFilters';
+import { StaggerList } from '../../components/Motion';
 
 // /manage/incidents (frontend.md §6.3: the incidents of the manager's units) and /admin/incidents
 // (§6.4 "Escalations": every unit, high severity by default). GET /incidents filtered by status
@@ -144,11 +145,11 @@ export default function IncidentListPage({ scope = 'manage' }) {
       )}
 
       {items.length > 0 && (
-        <ul className={`space-y-4 ${list.isPlaceholderData ? 'opacity-60' : ''}`} aria-busy={list.isPlaceholderData || undefined}>
+        <StaggerList className={`space-y-4 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`} aria-busy={list.isPlaceholderData || undefined}>
           {items.map((incident) => (
             <IncidentCard key={String(incident._id)} incident={incident} scope={scope} Heading="h3" />
           ))}
-        </ul>
+        </StaggerList>
       )}
 
       <Pagination

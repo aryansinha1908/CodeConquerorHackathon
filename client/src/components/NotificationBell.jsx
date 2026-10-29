@@ -10,10 +10,12 @@ import {
   MenuSeparator,
 } from '@headlessui/react';
 import { useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ArrowRight, Bell, CheckCheck } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { errorMessage, errorToastText } from '../lib/errors';
+import { menuIn, spring } from '../lib/motion';
 import { cn } from '../lib/utils';
 import { useNow } from '../features/resources/hooks';
 import {
@@ -41,10 +43,14 @@ const itemClass =
   'w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-md border-2 border-transparent ' +
   'data-focus:bg-[#ede8df] data-focus:border-[#1a1a1a] data-disabled:opacity-60 data-disabled:cursor-default';
 
-const footerItemClass =
+// The two footer actions share a shape but not colours: cn() only joins strings, so two background
+// classes on one element would leave the winner to the stylesheet's order (that hid "See all").
+const footerBase =
   'flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border-2 ' +
-  'border-[#1a1a1a] bg-white text-xs font-bold data-focus:bg-[#ede8df] data-focus:ring-2 ' +
-  'data-focus:ring-[#c0392b] data-disabled:opacity-50 data-disabled:cursor-not-allowed';
+  'border-[#1a1a1a] text-xs font-bold transition-colors data-focus:ring-2 data-focus:ring-[#c0392b] ' +
+  'data-disabled:opacity-50 data-disabled:cursor-not-allowed';
+const markAllClass = `${footerBase} bg-white text-[#1a1a1a] hover:bg-[#ede8df] data-focus:bg-[#ede8df]`;
+const seeAllClass = `${footerBase} bg-[#183d2d] text-white hover:bg-[#0f2a1e] data-focus:bg-[#0f2a1e]`;
 
 // One status line in the menu (loading, empty, failed). A disabled item, because a menu may hold
 // only items, groups and separators; screen readers still read it, and arrow keys skip it.
@@ -140,13 +146,13 @@ export function BellPanel({ unread = 0, onSelect, onMarkAll, markingAll = false 
       <MenuSeparator className="my-1 h-0.5 bg-[#1a1a1a]/15" />
       <MenuSection className="flex gap-2 p-2">
         <MenuItem disabled={unread <= 0 || markingAll}>
-          <button type="button" onClick={() => onMarkAll?.()} className={footerItemClass}>
+          <button type="button" onClick={() => onMarkAll?.()} className={markAllClass}>
             <CheckCheck className="w-3.5 h-3.5" aria-hidden="true" />
             {markingAll ? 'Marking…' : 'Mark all read'}
           </button>
         </MenuItem>
         <MenuItem>
-          <Link to="/notifications" className={cn(footerItemClass, 'bg-[#183d2d] text-white data-focus:bg-[#0f2a1e]')}>
+          <Link to="/notifications" className={seeAllClass}>
             See all
             <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
           </Link>
@@ -208,20 +214,35 @@ export function NotificationBell() {
         className="relative p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] hover:bg-[#ede8df] transition-all shadow-[2px_2px_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2 data-open:bg-[#ede8df]"
       >
         <Bell className="w-4 h-4" aria-hidden="true" />
-        {unread > 0 && (
-          <span
-            aria-hidden="true"
-            className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full border-2 border-[#1a1a1a] bg-[#c0392b] text-white text-[10px] font-black leading-none flex items-center justify-center"
-          >
-            {unreadBadgeText(unread)}
-          </span>
-        )}
+        {/* Keyed by the text, so a new count pops in. */}
+        <AnimatePresence initial={false}>
+          {unread > 0 && (
+            <motion.span
+              key={unreadBadgeText(unread)}
+              aria-hidden="true"
+              initial={{ scale: 0.4, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1, transition: spring }}
+              exit={{ scale: 0.4, opacity: 0, transition: { duration: 0.12 } }}
+              className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full border-2 border-[#1a1a1a] bg-[#c0392b] text-white text-[10px] font-black leading-none flex items-center justify-center"
+            >
+              {unreadBadgeText(unread)}
+            </motion.span>
+          )}
+        </AnimatePresence>
       </MenuButton>
+      {/* MenuItems only positions the panel (its anchor sets the position styles); the panel's look
+          and its entrance are on the inner motion.div, so the two never fight over transform. The
+          anchor also sets overflow: auto, so the padding leaves room for the panel's offset shadow. */}
       <MenuItems
         anchor="bottom end"
-        className="z-50 w-80 max-w-[calc(100vw-2rem)] [--anchor-gap:8px] bg-white border-2 border-[#1a1a1a] rounded-xl shadow-[4px_4px_0_#1a1a1a] font-mono text-[#1a1a1a] p-1 focus:outline-none"
+        className="z-50 w-80 max-w-[calc(100vw-2rem)] [--anchor-gap:2px] pt-1.5 pr-1.5 pb-1.5 focus:outline-none"
       >
-        <BellPanel unread={unread} onSelect={select} onMarkAll={readAll} markingAll={markAll.isPending} />
+        <motion.div
+          {...menuIn}
+          className="bg-white border-2 border-[#1a1a1a] rounded-xl shadow-[4px_4px_0_#1a1a1a] font-mono text-[#1a1a1a] p-1"
+        >
+          <BellPanel unread={unread} onSelect={select} onMarkAll={readAll} markingAll={markAll.isPending} />
+        </motion.div>
       </MenuItems>
     </Menu>
   );

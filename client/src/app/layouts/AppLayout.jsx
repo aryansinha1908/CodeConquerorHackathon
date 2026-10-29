@@ -1,24 +1,27 @@
-import React, { Suspense, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import React, { Suspense, useLayoutEffect, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuthStore } from '../../stores/auth';
-import { logout as apiLogout } from '../../features/auth/api';
-import { queryClient } from '../queryClient';
-import { toast } from 'sonner';
 import {
+  AlertCircle,
+  Award,
   Bell,
+  CalendarCheck,
   Compass,
   IdCard,
-  CalendarCheck,
-  Award,
   Layers,
-  Shield,
   LogOut,
   Menu,
+  Shield,
+  UserRound,
   X,
-  AlertCircle,
 } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
-import { NotificationBell } from '../../components/LazyPages';
+import { NotificationBell, UserMenu } from '../../components/LazyPages';
+import { AccountButtonFace, Avatar, accountButtonClass } from '../../components/AccountFace';
+import { useLogout } from '../../features/auth/useLogout';
+import { accountView } from '../../features/profile/account';
+import { spring } from '../../lib/motion';
 import {
   bellLabel,
   unreadBadgeText,
@@ -53,50 +56,119 @@ export function BellFallback() {
   );
 }
 
+/**
+ * The account button while UserMenu's code loads: the same face, so nothing shifts when the real
+ * menu button replaces it, but not a control (as BellFallback).
+ */
+export function UserMenuFallback() {
+  const view = accountView(useAuthStore((s) => s.user));
+  return (
+    <span role="img" aria-label={`Account: ${view.name}`} className={accountButtonClass}>
+      <AccountButtonFace view={view} />
+    </span>
+  );
+}
+
+// The main sections. Profile, ID verification and the Admin console live in the account menu (the
+// name at the right of the header) and on /profile.
+const SECTIONS = [
+  { to: '/explore', label: 'Explore', icon: Compass },
+  { to: '/bookings', label: 'Bookings', icon: CalendarCheck },
+  { to: '/badges', label: 'Badges', icon: Award },
+  { to: '/manage', label: 'Manage', icon: Layers, staff: true },
+];
+
+/**
+ * One section link. `boxed`: the active link draws its own green box (the mobile menu); otherwise
+ * DesktopNav's sliding indicator draws it behind the link.
+ */
+function SectionLink({ to, icon: Icon, label, onClick, boxed = false }) {
+  return (
+    <NavLink
+      to={to}
+      onClick={onClick}
+      className={({ isActive }) =>
+        `relative inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2 ${
+          boxed ? 'w-full min-h-[44px]' : ''
+        } ${
+          isActive
+            ? boxed
+              ? 'text-white bg-[#183d2d] border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
+              : 'text-white border-transparent'
+            : 'text-[#1a1a1a] border-transparent hover:border-[#1a1a1a] hover:bg-white/80'
+        }`
+      }
+    >
+      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+      {label}
+    </NavLink>
+  );
+}
+
+const isUnder = (pathname, to) => pathname === to || pathname.startsWith(`${to}/`);
+
+/**
+ * The desktop section links, with a green box that slides to the active one. The box is placed from
+ * the link's offset inside the nav (offsetLeft / offsetWidth), not from page coordinates: the header
+ * is sticky, and a navigation that changes the scroll (a long page to a short one) would otherwise
+ * fly the box in from where the page was scrolled. Re-measured when the nav resizes (web fonts).
+ */
+function DesktopNav({ sections }) {
+  const { pathname } = useLocation();
+  const navRef = useRef(null);
+  const [box, setBox] = useState(null);
+  const activeTo = sections.find((section) => isUnder(pathname, section.to))?.to ?? null;
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return undefined;
+    const measure = () => {
+      const link = activeTo ? nav.querySelector(`a[href="${activeTo}"]`) : null;
+      setBox(link ? { x: link.offsetLeft, width: link.offsetWidth } : null);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(nav);
+    return () => observer?.disconnect();
+  }, [activeTo, sections.length]);
+
+  return (
+    <nav ref={navRef} aria-label="Main" className="hidden lg:flex relative isolate items-center gap-1">
+      {box && (
+        <motion.span
+          aria-hidden="true"
+          initial={false}
+          animate={{ x: box.x, width: box.width }}
+          transition={spring}
+          className="absolute left-0 top-0 bottom-0 -z-10 rounded-md border-2 border-[#1a1a1a] bg-[#183d2d] shadow-[2px_2px_0_#1a1a1a]"
+        />
+      )}
+      {sections.map((section) => (
+        <SectionLink key={section.to} {...section} />
+      ))}
+    </nav>
+  );
+}
+
+const accountLinkClass =
+  'w-full min-h-[44px] inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 border-transparent hover:border-[#1a1a1a] hover:bg-[#f5f0e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]';
+
 export function AppLayout() {
-  const navigate = useNavigate();
   const location = useLocation();
-  const { user, clear } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const logout = useLogout();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMenu = () => setMobileMenuOpen(false);
+  // Any navigation closes the mobile menu: its own links, the account menu, the bell, Back.
+  const [menuPath, setMenuPath] = useState(location.pathname);
+  if (menuPath !== location.pathname) {
+    setMenuPath(location.pathname);
+    setMobileMenuOpen(false);
+  }
 
-  const roles = Array.isArray(user?.roles)
-    ? user.roles
-    : user?.role
-      ? [user.role]
-      : ['member'];
-
-  const isManager = roles.includes('manager') || roles.includes('admin');
-  const isAdmin = roles.includes('admin');
-  const isVerified = user?.verification?.status === 'approved' || isManager || isAdmin;
-  const isPending = user?.verification?.status === 'pending';
-
-  // frontend.md §8.1 step 4. POST /auth/logout always answers 200 and clears the cookie. The refresh
-  // cookie is httpOnly, so only the server can end the session: if the call fails (network, 5xx), the
-  // next visit would sign straight back in, so the user stays signed in here and is told so. On
-  // success, leave the guarded routes first (flushSync commits the navigation before clear(), so
-  // RequireAuth never sees the empty store and adds ?next=), then drop the token and every cached query.
-  const handleLogout = async () => {
-    try {
-      await apiLogout();
-    } catch (err) {
-      toast.error("Couldn't reach the server, so you're still signed in.", {
-        description: err?.requestId ? `ref: ${err.requestId}` : 'Check your connection and try again.',
-        action: { label: 'Retry', onClick: () => handleLogout() },
-      });
-      return;
-    }
-    await navigate('/login', { replace: true, flushSync: true });
-    clear();
-    queryClient.clear();
-    toast.success('Logged out successfully');
-  };
-
-  const navLinkClass = ({ isActive }) =>
-    `inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 transition-all duration-150 ${
-      isActive
-        ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
-        : 'bg-transparent text-[#1a1a1a] border-transparent hover:border-[#1a1a1a] hover:bg-white/80'
-    }`;
+  const view = accountView(user);
+  const isPending = view.verification.status === 'pending';
+  const sections = SECTIONS.filter((section) => !section.staff || view.isManager);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f5f0e8] text-[#1a1a1a] font-mono selection:bg-[#c0392b] selection:text-white">
@@ -107,180 +179,112 @@ export function AppLayout() {
 
       {/* ── HEADER ──────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-[#f5f0e8] border-b-2 border-[#1a1a1a] shadow-[0_2px_0_rgba(26,26,26,0.08)]">
-        <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
           {/* Brand */}
-          <div className="flex items-center gap-3">
-            <Link to="/explore" className="flex items-center gap-2.5 group">
-              <div className="w-9 h-9 bg-[#c0392b] border-2 border-[#1a1a1a] rounded-lg shadow-[2px_2px_0_#1a1a1a] flex items-center justify-center font-black text-white text-base transition-transform group-hover:-translate-y-0.5">
-                CC
-              </div>
-              <div className="hidden sm:block">
-                <span className="text-xs tracking-widest text-[#1a1a1a]/60 uppercase block leading-none">
-                  NIT Jamshedpur
-                </span>
-                <span className="text-base font-black text-[#1a1a1a] tracking-tight block">
-                  CampusCommons
-                </span>
-              </div>
-            </Link>
-
-            <span className="hidden md:inline-block text-[#1a1a1a]/30 font-bold ml-1">/</span>
-
-            {/* Quick role badge */}
-            <div className="hidden md:flex items-center gap-1.5">
-              <Badge variant="outline" size="sm" className="bg-white/80">
-                {roles[0]?.toUpperCase() || 'MEMBER'}
-              </Badge>
-              {isVerified ? (
-                <Badge variant="forest" size="sm" className="hidden lg:inline-flex">
-                  VERIFIED
-                </Badge>
-              ) : (
-                <Link to="/verification">
-                  <Badge variant={isPending ? 'amber' : 'red'} size="sm">
-                    {isPending ? 'VERIFY PENDING' : 'UNVERIFIED'}
-                  </Badge>
-                </Link>
-              )}
+          <Link to="/explore" className="flex items-center gap-2.5 group shrink-0">
+            <div className="w-9 h-9 bg-[#c0392b] border-2 border-[#1a1a1a] rounded-lg shadow-[2px_2px_0_#1a1a1a] flex items-center justify-center font-black text-white text-base transition-transform group-hover:-translate-y-0.5">
+              CC
             </div>
-          </div>
+            <div className="hidden sm:block">
+              <span className="text-xs tracking-widest text-[#1a1a1a]/60 uppercase block leading-none">
+                NIT Jamshedpur
+              </span>
+              <span className="text-base font-black text-[#1a1a1a] tracking-tight block">
+                CampusCommons
+              </span>
+            </div>
+          </Link>
 
-          {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-1">
-            <NavLink to="/explore" className={navLinkClass}>
-              <Compass className="w-3.5 h-3.5" />
-              Explore
-            </NavLink>
-            <NavLink to="/verification" className={navLinkClass}>
-              <IdCard className="w-3.5 h-3.5" />
-              Verification
-            </NavLink>
-            <NavLink to="/bookings" className={navLinkClass}>
-              <CalendarCheck className="w-3.5 h-3.5" />
-              Bookings
-            </NavLink>
-            <NavLink to="/badges" className={navLinkClass}>
-              <Award className="w-3.5 h-3.5" />
-              Badges
-            </NavLink>
-            {isManager && (
-              <NavLink to="/manage" className={navLinkClass}>
-                <Layers className="w-3.5 h-3.5" />
-                Manage
-              </NavLink>
-            )}
-            {isAdmin && (
-              <NavLink to="/admin" className={navLinkClass}>
-                <Shield className="w-3.5 h-3.5" />
-                Admin
-              </NavLink>
-            )}
-          </nav>
+          {/* Desktop nav: from lg, where every link fits on one line beside the account button */}
+          <DesktopNav sections={sections} />
 
           {/* User actions */}
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex flex-col text-right">
-              <span className="text-xs font-bold text-[#1a1a1a] truncate max-w-[140px]">
-                {user?.name || user?.email?.split('@')[0] || 'User'}
-              </span>
-              <span className="text-[10px] text-[#1a1a1a]/60">
-                {user?.department?.name || user?.memberType || 'NIT JSR'}
-              </span>
-            </div>
-
             {/* frontend.md §7: the unread count and the latest 5, on every page of the app shell. */}
             <Suspense fallback={<BellFallback />}>
               <NotificationBell />
             </Suspense>
 
-            <button
-              onClick={handleLogout}
-              title="Logout"
-              className="p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] hover:bg-[#c0392b] hover:text-white transition-all shadow-[2px_2px_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
-              aria-label="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            <Suspense fallback={<UserMenuFallback />}>
+              <UserMenu />
+            </Suspense>
 
             {/* Mobile menu toggle */}
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a]"
-              aria-label="Toggle navigation"
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className="lg:hidden p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2"
+              aria-label={mobileMenuOpen ? 'Close the menu' : 'Open the menu'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
-        {/* Mobile menu dropdown */}
-        {mobileMenuOpen && (
-          <div className="md:hidden border-t-2 border-[#1a1a1a] bg-white px-4 py-4 space-y-2">
-            <div className="flex items-center justify-between pb-2 border-b border-[#1a1a1a]/15 text-xs">
-              <span className="text-[#1a1a1a]/70">{user?.email}</span>
-              <Badge variant={isVerified ? 'forest' : 'amber'} size="sm">
-                {isVerified ? 'VERIFIED' : 'UNVERIFIED'}
-              </Badge>
-            </div>
-            <div className="flex flex-col gap-1.5 pt-2">
-              <NavLink
-                to="/explore"
-                onClick={() => setMobileMenuOpen(false)}
-                className={navLinkClass}
-              >
-                <Compass className="w-4 h-4" />
-                Explore Resources
-              </NavLink>
-              <NavLink
-                to="/verification"
-                onClick={() => setMobileMenuOpen(false)}
-                className={navLinkClass}
-              >
-                <IdCard className="w-4 h-4" />
-                ID Card Verification
-              </NavLink>
-              <NavLink
-                to="/bookings"
-                onClick={() => setMobileMenuOpen(false)}
-                className={navLinkClass}
-              >
-                <CalendarCheck className="w-4 h-4" />
-                My Bookings
-              </NavLink>
-              <NavLink
-                to="/badges"
-                onClick={() => setMobileMenuOpen(false)}
-                className={navLinkClass}
-              >
-                <Award className="w-4 h-4" />
-                Badges & Certifications
-              </NavLink>
-              {isManager && (
-                <NavLink
-                  to="/manage"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={navLinkClass}
-                >
-                  <Layers className="w-4 h-4" />
-                  Management Console
-                </NavLink>
-              )}
-              {isAdmin && (
-                <NavLink
-                  to="/admin"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={navLinkClass}
-                >
-                  <Shield className="w-4 h-4" />
-                  Admin Console
-                </NavLink>
-              )}
-            </div>
-          </div>
-        )}
+        {/* Mobile menu: the sections, then the account (what the account menu holds on desktop) */}
+        <AnimatePresence initial={false}>
+          {mobileMenuOpen && (
+            <motion.div
+              id="mobile-menu"
+              key="mobile-menu"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="lg:hidden overflow-hidden border-t-2 border-[#1a1a1a] bg-white"
+            >
+              <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+                <nav aria-label="Main" className="flex flex-col gap-1.5">
+                  {sections.map((section) => (
+                    <SectionLink key={section.to} {...section} onClick={closeMenu} boxed />
+                  ))}
+                </nav>
+                <div className="pt-3 border-t-2 border-[#1a1a1a]/15 space-y-1.5">
+                  <div className="flex items-center gap-3 pb-2">
+                    <Avatar initials={view.initials} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black truncate">{view.name}</p>
+                      <p className="text-[11px] text-[#1a1a1a]/70 truncate">{view.email}</p>
+                    </div>
+                    <Badge variant={view.verification.badge.variant} size="sm">
+                      {view.verification.badge.label}
+                    </Badge>
+                  </div>
+                  <Link to="/profile" onClick={closeMenu} className={accountLinkClass}>
+                    <UserRound className="w-4 h-4" aria-hidden="true" />
+                    Profile
+                  </Link>
+                  <Link to="/verification" onClick={closeMenu} className={accountLinkClass}>
+                    <IdCard className="w-4 h-4" aria-hidden="true" />
+                    ID verification
+                  </Link>
+                  {view.isAdmin && (
+                    <Link to="/admin" onClick={closeMenu} className={accountLinkClass}>
+                      <Shield className="w-4 h-4" aria-hidden="true" />
+                      Admin console
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeMenu();
+                      logout();
+                    }}
+                    className={`${accountLinkClass} text-[#a93226]`}
+                  >
+                    <LogOut className="w-4 h-4" aria-hidden="true" />
+                    Log out
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Global verification banner */}
-        {!isVerified && !isManager && !isAdmin && location.pathname !== '/verification' && (
+        {!view.verified && location.pathname !== '/verification' && (
           <div className="bg-[#f39c12]/20 border-t border-[#1a1a1a] px-4 py-1.5 text-xs text-[#1a1a1a] flex items-center justify-center gap-2 font-mono">
             <AlertCircle className="w-4 h-4 text-[#e67e22] shrink-0" />
             <span>

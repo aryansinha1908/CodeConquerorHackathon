@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion } from 'framer-motion';
+import { enter, fadeUp } from '../../lib/motion';
 
 /**
  * AuthLayout — Hacktoberfest-themed split layout.
@@ -60,7 +62,7 @@ export function AuthLayout({ title, subtitle, children }) {
         </div>
 
         {/* Tagline */}
-        <div className="relative z-10 flex-1 flex flex-col justify-center py-8">
+        <motion.div variants={fadeUp} {...enter} className="relative z-10 flex-1 flex flex-col justify-center py-8">
           <div className="flex gap-1.5 mb-6">
             <ColorDot color="bg-[#c0392b]" />
             <ColorDot color="bg-[#e67e22]" />
@@ -91,7 +93,7 @@ export function AuthLayout({ title, subtitle, children }) {
               </li>
             ))}
           </ul>
-        </div>
+        </motion.div>
 
         {/* Footer */}
         <p className="relative z-10 text-xs text-white/40 mt-4">
@@ -109,7 +111,11 @@ export function AuthLayout({ title, subtitle, children }) {
       >
         <div className="w-full max-w-md">
           {/* Card */}
-          <div className="bg-white border-2 border-[#1a1a1a] rounded-xl p-8 shadow-[4px_4px_0px_0px_#1a1a1a]">
+          <motion.div
+            variants={fadeUp}
+            {...enter}
+            className="bg-white border-2 border-[#1a1a1a] rounded-xl p-8 shadow-[4px_4px_0px_0px_#1a1a1a]"
+          >
             {/* Header */}
             <header className="mb-7">
               <h1 className="text-2xl font-black text-[#1a1a1a] leading-tight mb-1">
@@ -122,7 +128,7 @@ export function AuthLayout({ title, subtitle, children }) {
 
             {/* Slot for form content */}
             {children}
-          </div>
+          </motion.div>
 
           {/* Bottom note */}
           <p className="text-center text-xs text-[#1a1a1a]/50 mt-4 font-mono">

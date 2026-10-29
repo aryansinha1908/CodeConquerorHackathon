@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowDown,
@@ -16,6 +16,7 @@ import {
   TriangleAlert,
   Users,
 } from 'lucide-react';
+import { FadeUp, StaggerItem, StaggerList } from '../components/Motion';
 import { Badge } from '../components/ui/Badge';
 import { LinkButton } from '../features/manage/components/Bits';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -86,15 +87,16 @@ function DetailSkeleton() {
   );
 }
 
+// A card of the left column; it rises in after the one above it (the column is a StaggerList).
 function SectionCard({ icon: Icon, title, children }) {
   return (
-    <section className={cardClass}>
+    <StaggerItem as="section" className={cardClass}>
       <h2 className="text-base font-black tracking-tight flex items-center gap-2 mb-3">
         <Icon className="w-4 h-4 text-[#183d2d]" aria-hidden="true" />
         {title}
       </h2>
       {children}
-    </section>
+    </StaggerItem>
   );
 }
 
@@ -356,8 +358,31 @@ function BookingArea({ resource }) {
   );
 }
 
+// Where the sticky rules column stops (lg and up; `top` does nothing on the stacked layout). It
+// sticks 6rem down, below the header, when it fits on the screen. When it is taller, a 6rem top
+// would leave its last cards below the bottom edge for good, so its top goes negative instead: the
+// column scrolls with the page until its bottom card is 1.5rem above the bottom edge, then stays
+// there. Nothing is cut off, and there is no second scrollbar inside the page.
+const STICKY_TOP = 'min(6rem, calc(100vh - var(--rules-height, 0px) - 1.5rem))';
+
+/** Keeps --rules-height on the element at its current height (cards, fonts and widths change it). */
+function useHeightVar(ref) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const update = () => el.style.setProperty('--rules-height', `${el.offsetHeight}px`);
+    update();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+}
+
 /** The page body for a loaded resource (the Detail of GET /resources/:id). Exported for the tests. */
 export function ResourceDetail({ resource }) {
+  const rulesRef = useRef(null);
+  useHeightVar(rulesRef);
   const limits = limitsList(resource.limits);
   const checklist = Array.isArray(resource.checklist) ? resource.checklist.filter(Boolean) : [];
   return (
@@ -369,10 +394,19 @@ export function ResourceDetail({ resource }) {
         </p>
       </nav>
 
-      <Header resource={resource} />
+      <FadeUp>
+        <Header resource={resource} />
+      </FadeUp>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-5 space-y-6">
+        {/* The rules stay in view while the booking side scrolls: sticky from lg, at STICKY_TOP. */}
+        <StaggerList
+          as="div"
+          ref={rulesRef}
+          step={0.06}
+          style={{ top: STICKY_TOP }}
+          className="lg:col-span-5 space-y-6 lg:sticky"
+        >
           <SectionCard icon={ScrollText} title="Usage rules">
             {resource.usageRules ? (
               <p className="text-sm leading-relaxed whitespace-pre-line break-words">{resource.usageRules}</p>
@@ -408,12 +442,16 @@ export function ResourceDetail({ resource }) {
             </SectionCard>
           )}
           <Closures blackouts={resource.availability?.blackouts} />
-        </div>
+        </StaggerList>
 
-        <div className="lg:col-span-7 space-y-6">
-          <EligibilityCard resource={resource} />
-          <BookingArea resource={resource} />
-        </div>
+        <StaggerList as="div" step={0.08} delay={0.05} className="lg:col-span-7 space-y-6">
+          <StaggerItem as="div">
+            <EligibilityCard resource={resource} />
+          </StaggerItem>
+          <StaggerItem as="div">
+            <BookingArea resource={resource} />
+          </StaggerItem>
+        </StaggerList>
       </div>
     </div>
   );
