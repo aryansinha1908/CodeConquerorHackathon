@@ -5,6 +5,7 @@ import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Field } from '../components/Bits';
 import { OWN_REQUEST_MESSAGE, badgeStateView, canDecide, isOwnRequest, requestView } from './badgeView';
+import { StaggerItem } from '../../../components/Motion';
 
 /**
  * One row of GET /badge-requests: the member (name, member type, department; never an email), the
@@ -22,7 +23,7 @@ export function BadgeRequestCard({ row, user, onView, onDecide }) {
   const noEvidenceId = `badge-request-${view.id}-no-evidence`;
 
   return (
-    <li>
+    <StaggerItem>
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
           <div className="min-w-0">
@@ -118,6 +119,6 @@ export function BadgeRequestCard({ row, user, onView, onDecide }) {
             ))}
         </div>
       </Card>
-    </li>
+    </StaggerItem>
   );
 }

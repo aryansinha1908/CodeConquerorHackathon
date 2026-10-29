@@ -4,6 +4,7 @@ import { CalendarClock, ChevronRight, MapPin } from 'lucide-react';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { cn } from '../../../lib/utils';
 import { bookingPath, cardHint, formatLocation, formatSlot, resourceTitle, slotLength } from './bookingView';
+import { StaggerItem } from '../../../components/Motion';
 
 /**
  * One booking of GET /bookings/mine (resource { _id, title, slug, location }, waitlistPosition on
@@ -20,9 +21,10 @@ export function BookingCard({ booking, now }) {
   const purpose = typeof booking.purpose === 'string' ? booking.purpose : '';
 
   return (
-    <li
+    <StaggerItem
       className={cn(
-        'relative rounded-xl border-2 bg-white p-4 sm:p-5 font-mono text-[#1a1a1a] transition-all',
+        // Not transition-all: it would also ease framer's entrance transform, frame by frame.
+        'relative rounded-xl border-2 bg-white p-4 sm:p-5 font-mono text-[#1a1a1a] transition-[box-shadow,translate]',
         'shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] hover:-translate-x-[2px] hover:-translate-y-[2px]',
         'focus-within:ring-2 focus-within:ring-[#c0392b] focus-within:ring-offset-2',
         overdue ? 'border-[#c0392b]' : 'border-[#1a1a1a]'
@@ -71,6 +73,6 @@ export function BookingCard({ booking, now }) {
         className="hidden sm:block absolute right-3 bottom-4 w-4 h-4 text-[#1a1a1a]/50"
         aria-hidden="true"
       />
-    </li>
+    </StaggerItem>
   );
 }

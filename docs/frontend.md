@@ -129,6 +129,7 @@
 | HTTP | **axios** | Interceptors for the bearer token, refresh and error normalisation |
 | Dates | **date-fns + date-fns-tz** | IST formatting |
 | Toasts | **sonner** | |
+| Motion | **framer-motion** | Page and list entrances, menu and dialog openings, sliding active indicators. Opacity and transform only; `<MotionConfig reducedMotion="user">` drops the movement for reduce-motion users. Presets in `lib/motion.js`, `StaggerList` / `StaggerItem` / `FadeUp` in `components/Motion.jsx` |
 | Images | **browser-image-compression** | Photos ≤ 1 MB / 1600 px before upload (saves Cloudinary quota and mobile data) |
 
 ---
@@ -189,7 +190,7 @@ client/
 | `/incidents/new` | Report incident | Type, severity, description, photos; `?bookingId=` pre-fill | `POST /incidents` |
 | `/incidents/:id` | Incident detail | Thread, status, resolution card | `GET /incidents/:id`, `POST /incidents/:id/comments` |
 | `/notifications` | Notifications | List, mark read, mark all read | `GET /notifications`, `PATCH …/read`, `PATCH …/read-all` |
-| `/profile` | Profile | Details, verification status, quota overview, email notification toggle | `GET /auth/me` |
+| `/profile` | Profile (built) | Details (email, member type, department, roles, managed units), ID verification status with its reason and a link to `/verification`, my badges, strikes and suspension when present, console links by role (Manage; Admin: verifications, audit, incidents), Log out. Opened from the account menu (the name at the right of the header: Profile · ID verification · Admin console · Log out). Not built yet: quota overview, email notification toggle | `GET /auth/me` (re-read on opening), `GET /badges/mine`, `GET /org-units` |
 
 ### 6.3 Manager (`/manage/*`, requires `manager`)
 
@@ -230,6 +231,7 @@ client/
 | `ReasonDialog` | Reject, waitlist, cancel, resolve, suspend | Required textarea (10–500 chars) with a character counter, plus quick-pick templates ("Clashes with lab session", "Missing safety training") |
 | `QuotaMeter` | Resource detail, profile | Progress bar plus text: "4 of 6 h this week · 1 of 1 active booking" |
 | `NotificationBell` | App header | Unread badge, dropdown of the latest 5 |
+| `UserMenu` | App header | The signed-in user's initials and name; a menu with Profile, ID verification (with its status), Admin console (admins) and Log out. The header's links are Explore, Bookings, Badges and Manage (managers); below `lg` they and the account items move into the hamburger menu |
 | `RequireAuth` / `RequireRole` / `RequireVerified` | Router | Redirect to login, show a 403 page, or show a "verify to book" prompt |
 | `DataTable`, `EmptyState`, `Skeleton`, `ErrorState` | Lists | Every list has loading, empty and error states, and the error state shows the `requestId` |
 
@@ -270,7 +272,8 @@ The keys as the app builds them: each feature's `api.js` exports its key factory
 | `['badge-requests', { status, page, limit }]` | `GET /badge-requests` (`/manage/badges`; the dashboard's count) | on focus; the dashboard count every 30 s |
 | `['badges', 'catalogue']` | `GET /badges` (the listing form's badge picker) | stale after 5 min |
 | `['badges', 'catalogue', { orgUnit }]` | `GET /badges?orgUnit=` (the grant dialog: one per managed unit, `orgUnit: null` for an admin) | stale after 60 s |
-| `['badges', …]`, e.g. `['badges', 'mine']` | the member's `/badges` page (a teammate's; keys other than `'catalogue'` are its own) | its own; badge decisions and grants invalidate `['badges', 'mine']` |
+| `['badges', …]`, e.g. `['badges', 'mine']` | the member's `/badges` page (a teammate's; keys other than `'catalogue'` are its own). `/profile` reads `GET /badges/mine` under `['badges', 'mine']` too and caches the whole envelope `{ success, data, requestId }`; its reader (`myBadgeRows`) also accepts a bare array, in case the `/badges` page caches that | its own; badge decisions and grants invalidate `['badges', 'mine']`; `/profile`: stale after 60 s |
+| `['auth', 'me']` | `GET /auth/me` on opening `/profile`; the answer is stored in the auth store | on every visit |
 | `['incidents', params]` | `GET /incidents` (`/manage/incidents`, `/admin/incidents`) | on focus |
 | `['incidents', 'count', { status: 'open,in_review', page: 1, limit: 1 }]` | `GET /incidents` (the dashboard's open-incident count) | **every 30 s** |
 | `['incident', id]` | `GET /incidents/:id` | on focus |
@@ -358,7 +361,7 @@ Zod schemas in `lib/schemas/` mirror the server rules in [`backend.md` §7](./ba
 - `AvailabilityGrid` is a `role="grid"` with arrow-key navigation and `aria-selected`.
 - Status changes after mutations are announced through an `aria-live="polite"` region.
 - Contrast is at least 4.5:1 for text, and focus rings are always visible.
-- `prefers-reduced-motion` is respected.
+- `prefers-reduced-motion` is respected: framer-motion's `reducedMotion="user"` skips every transform, and the CSS spinners use `motion-safe:`.
 - Tap targets are at least 44 × 44 px on the check-in and check-out screens.
 - Images have alt text; condition photos use "Check-in photo 1 of 3, FDM 3D Printer".
 
@@ -395,6 +398,6 @@ The testing instructions in the submission list all demo logins.
 
 | Purpose | Packages |
 |---|---|
-| Core (MVP) | `react`, `react-dom`, `react-router-dom`, `@tanstack/react-query`, `zustand`, `axios`, `react-hook-form`, `@hookform/resolvers`, `zod`, `tailwindcss`, `@tailwindcss/vite`, `@headlessui/react`, `lucide-react`, `sonner`, `date-fns`, `date-fns-tz`, `browser-image-compression` |
+| Core (MVP) | `react`, `react-dom`, `react-router-dom`, `@tanstack/react-query`, `zustand`, `axios`, `react-hook-form`, `@hookform/resolvers`, `zod`, `tailwindcss`, `@tailwindcss/vite`, `@headlessui/react`, `lucide-react`, `sonner`, `date-fns`, `date-fns-tz`, `browser-image-compression`, `framer-motion` |
 | Dev | `vite`, `@vitejs/plugin-react`, `eslint`, `prettier`, `@tanstack/react-query-devtools` |
 | Cool-to-have | `qrcode.react`, `html5-qrcode`, `react-joyride`, `socket.io-client`, `tesseract.js`, `recharts`, `react-big-calendar`, `react-leaflet`, `leaflet`, `vite-plugin-pwa`, `react-i18next` |

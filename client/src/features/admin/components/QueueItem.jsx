@@ -10,6 +10,7 @@ import {
   memberTypeLabel,
 } from '../../verification/api';
 import { formatIstDateTime } from '../../../lib/time';
+import { StaggerItem } from '../../../components/Motion';
 
 // Never colour alone (frontend.md §1, principle 2): every status has an icon and a label too. Gold,
 // not amber, for pending: white on amber is under the 4.5:1 contrast of frontend.md §10.3.
@@ -60,7 +61,7 @@ export function QueueItem({ item, units, isSelf, onView, onDecide }) {
   const noCardId = `queue-${user._id}-no-card`;
 
   return (
-    <li>
+    <StaggerItem>
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
           <div className="min-w-0">
@@ -146,6 +147,6 @@ export function QueueItem({ item, units, isSelf, onView, onDecide }) {
             ))}
         </div>
       </Card>
-    </li>
+    </StaggerItem>
   );
 }

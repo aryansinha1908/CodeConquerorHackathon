@@ -8,7 +8,7 @@ Built in 48 hours for a hackathon. It is an independent prototype, not affiliate
 
 | Part | What |
 |---|---|
-| Client (`client/`) | React 19, Vite 8, React Router 7, TanStack Query 5, Zustand, React Hook Form + Zod, Tailwind CSS 4, Headless UI, lucide-react, sonner |
+| Client (`client/`) | React 19, Vite 8, React Router 7, TanStack Query 5, Zustand, React Hook Form + Zod, Tailwind CSS 4, Headless UI, framer-motion, lucide-react, sonner |
 | Server (`server/`) | Node 20+ (ESM), Express 5, Mongoose 9 on MongoDB, ioredis 5 on Redis, JWT access tokens with rotating refresh cookies and email OTP, Cloudinary uploads, Nodemailer, a `node-cron` sweeper, pino logs, helmet, express-rate-limit |
 | Hosting | Vercel (client, rewriting `/api/*` to the API), Render (API), MongoDB Atlas, Upstash Redis, Cloudinary, Brevo or Gmail SMTP |
 

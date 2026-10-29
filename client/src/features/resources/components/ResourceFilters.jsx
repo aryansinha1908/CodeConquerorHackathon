@@ -1,7 +1,9 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Select } from '../../../components/ui/Select';
+import { press, spring } from '../../../lib/motion';
 import { cn } from '../../../lib/utils';
 import { errorMessage } from '../../../lib/errors';
 import { groupUnits } from '../../verification/api';
@@ -15,14 +17,36 @@ import { CATEGORY_OPTIONS } from '../format';
 
 const SEARCH_DELAY_MS = 400;
 
-const pillClass = (active) =>
-  cn(
-    'px-3 py-2 min-h-[40px] text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 transition-all',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2',
-    active
-      ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
-      : 'bg-[#ede8df] text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
+// A category pill. The active one's green box is a shared layoutId, so it slides to the pill you
+// pick. It sits behind the label (isolate + -z-10: above the pill's own background, below its text)
+// and covers the border, so active and inactive pills are the same size and nothing reflows.
+function CategoryPill({ active, onClick, layoutId, children }) {
+  return (
+    <motion.button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      {...press}
+      className={cn(
+        'relative isolate px-3 py-2 min-h-[40px] text-xs font-bold font-mono uppercase tracking-wider rounded-md border-2 transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2',
+        active
+          ? 'text-white border-transparent'
+          : 'bg-[#ede8df] text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
+      )}
+    >
+      {children}
+      {active && (
+        <motion.span
+          layoutId={layoutId}
+          transition={spring}
+          aria-hidden="true"
+          className="absolute -inset-[2px] -z-10 rounded-md border-2 border-[#1a1a1a] bg-[#183d2d] shadow-[2px_2px_0_#1a1a1a]"
+        />
+      )}
+    </motion.button>
   );
+}
 
 export function ResourceFilters({
   filters,
@@ -36,6 +60,7 @@ export function ResourceFilters({
 }) {
   const ids = useId();
   const searchId = `${ids}-search`;
+  const pillId = `${ids}-active-category`;
   const eligibleId = `${ids}-eligible`;
   const eligibleHintId = `${ids}-eligible-hint`;
 
@@ -172,26 +197,25 @@ export function ResourceFilters({
 
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-[#1a1a1a]/15">
         <div role="group" aria-label="Category" className="flex flex-wrap items-center gap-1.5">
-          <button type="button" aria-pressed={!filters.category} onClick={() => onChange({ category: '' })} className={pillClass(!filters.category)}>
+          <CategoryPill active={!filters.category} onClick={() => onChange({ category: '' })} layoutId={pillId}>
             All categories
-          </button>
+          </CategoryPill>
           {CATEGORY_OPTIONS.map((option) => {
             const active = filters.category === option.value;
             return (
-              <button
+              <CategoryPill
                 key={option.value}
-                type="button"
-                aria-pressed={active}
+                active={active}
                 onClick={() => onChange({ category: active ? '' : option.value })}
-                className={pillClass(active)}
+                layoutId={pillId}
               >
                 {option.label}
-              </button>
+              </CategoryPill>
             );
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-3 shrink-0">
           <div className="flex items-start gap-2">
             <input
               id={eligibleId}
@@ -205,16 +229,25 @@ export function ResourceFilters({
               <label htmlFor={eligibleId} className="text-xs font-bold cursor-pointer select-none">
                 Only show what I can book
               </label>
-              <p id={eligibleHintId} className="text-[11px] text-[#1a1a1a]/75">
+              <p id={eligibleHintId} className="text-[11px] text-[#1a1a1a]/75 max-w-[17rem]">
                 The checks of each resource's checklist that don't need a time.
               </p>
             </div>
           </div>
-          {hasFilters && (
-            <Button type="button" variant="ghost" size="sm" className="min-h-[40px] underline" onClick={reset}>
-              Clear filters
-            </Button>
-          )}
+          {/* Always rendered, so its space is kept and the box doesn't grow when a filter comes on.
+              With nothing to clear it is invisible (visibility: hidden takes it out of the tab order
+              and the pointer's reach) and aria-hidden; Button's transition fades it. Not `disabled`:
+              Button's disabled:opacity-50 would fight opacity-0 (cn() doesn't merge classes). */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn('min-h-[40px] underline', hasFilters ? 'opacity-100 visible' : 'opacity-0 invisible')}
+            onClick={reset}
+            aria-hidden={!hasFilters || undefined}
+          >
+            Clear filters
+          </Button>
         </div>
       </div>
     </section>

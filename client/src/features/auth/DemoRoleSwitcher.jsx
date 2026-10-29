@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { Zap } from 'lucide-react';
+import { enter, fadeUp, press, stagger } from '../../lib/motion';
 import { demoLogin } from './api';
 import { toast } from 'sonner';
 
@@ -45,29 +47,32 @@ export function DemoRoleSwitcher({ roles, onLogin }) {
           Demo mode — Try as
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      {/* The role buttons come in one after another once demo-config answers. */}
+      <motion.div variants={stagger(0.05, 0.1)} {...enter} className="flex flex-wrap gap-2">
         {roles.map((role) => {
           const meta = ROLE_LABELS[role] ?? { label: role, emoji: '👤' };
           return (
-            <button
+            <motion.button
               key={role}
+              variants={fadeUp}
+              {...press}
               onClick={() => handleDemoLogin(role)}
               disabled={loading !== null}
               className={[
                 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-[#1a1a1a]',
                 'text-xs font-bold font-mono text-white',
                 'shadow-[2px_2px_0_#1a1a1a] active:shadow-none active:translate-x-[2px] active:translate-y-[2px]',
-                'transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                'transition-[box-shadow,translate,background-color,opacity] disabled:opacity-50 disabled:cursor-not-allowed',
                 meta.color ?? 'bg-[#183d2d]',
               ].join(' ')}
               aria-label={`Try as ${meta.label}`}
             >
               <span aria-hidden="true">{meta.emoji}</span>
               {loading === role ? 'Loading…' : meta.label}
-            </button>
+            </motion.button>
           );
         })}
-      </div>
+      </motion.div>
     </div>
   );
 }

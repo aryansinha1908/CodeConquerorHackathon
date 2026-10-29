@@ -6,7 +6,9 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@headlessui/react';
+import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
+import { dialogIn } from '../../lib/motion';
 import { cn } from '../../lib/utils';
 
 /**
@@ -19,6 +21,9 @@ import { cn } from '../../lib/utils';
  * - `returnFocusRef`: where focus goes when the dialog closes and the element that opened it is
  *   gone (a row that left the list after a decision), instead of falling to <body>.
  * - `wide`: a wider panel (side-by-side photos, a long form).
+ *
+ * The backdrop fades and the panel zooms in slightly (framer-motion, as Headless UI documents:
+ * `as={motion.div}`); closing is immediate.
  */
 export function Dialog({
   open,
@@ -52,10 +57,17 @@ export function Dialog({
 
   return (
     <HeadlessDialog open={open} onClose={close} className="relative z-50">
-      <DialogBackdrop className="fixed inset-0 bg-[#1a1a1a]/60" />
+      <DialogBackdrop
+        as={motion.div}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: { duration: 0.15 } }}
+        className="fixed inset-0 bg-[#1a1a1a]/60"
+      />
       <div className="fixed inset-0 w-screen overflow-y-auto p-4">
         <div className="flex min-h-full items-center justify-center">
           <DialogPanel
+            as={motion.div}
+            {...dialogIn}
             aria-busy={busy || undefined}
             className={cn(
               'w-full bg-white border-2 border-[#1a1a1a] rounded-xl shadow-[6px_6px_0_#1a1a1a] font-mono text-[#1a1a1a]',

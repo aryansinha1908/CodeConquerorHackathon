@@ -15,6 +15,7 @@ import {
   resolutionView,
   unitLabel,
 } from './incidentView';
+import { StaggerItem } from '../../../components/Motion';
 
 /**
  * One incident in a list (api.md IncidentListItem: no photos or thread, commentCount instead). The
@@ -26,7 +27,7 @@ export function IncidentCard({ incident, scope, Heading = 'h3' }) {
   const reported = formatIstShortDateTime(incident.createdAt);
   const unit = unitLabel(incident.orgUnit);
   return (
-    <li>
+    <StaggerItem>
       <Card variant={incident.severity === 'high' && incident.status !== 'resolved' ? 'danger' : 'default'} className="p-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
           <div className="min-w-0">
@@ -72,6 +73,6 @@ export function IncidentCard({ incident, scope, Heading = 'h3' }) {
           </p>
         )}
       </Card>
-    </li>
+    </StaggerItem>
   );
 }

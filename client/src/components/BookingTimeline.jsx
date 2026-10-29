@@ -27,6 +27,7 @@ import { Skeleton } from './ui/Skeleton';
 import { formatIstShortDateTime } from '../lib/time';
 import { cn } from '../lib/utils';
 import { useTimeline } from '../features/bookings/api';
+import { StaggerItem, StaggerList } from './Motion';
 
 // GET /bookings/:id/timeline (api.md "Bookings"): audit events, condition reports and incidents,
 // oldest first, as a vertical timeline with the actor, the IST time and the reason
@@ -262,12 +263,14 @@ export function BookingTimeline({
     );
   }
   return (
-    <ol
+    <StaggerList
+      as="ol"
+      step={0.06}
       aria-label={label}
       className={cn('relative ml-[18px] border-l-2 border-[#1a1a1a] space-y-6 font-mono text-[#1a1a1a]', className)}
     >
       {list.map((item, index) => (
-        <li
+        <StaggerItem
           key={`${index}-${asText(item.kind)}-${asText(item.at)}`}
           className="relative pl-8 min-h-[36px]"
         >
@@ -278,9 +281,9 @@ export function BookingTimeline({
           ) : (
             <EventItem item={item} />
           )}
-        </li>
+        </StaggerItem>
       ))}
-    </ol>
+    </StaggerList>
   );
 }
 
