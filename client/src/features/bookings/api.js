@@ -354,6 +354,75 @@ export function useBooking(id, options = {}) {
   });
 }
 
+// ── QR booking pass (backend.md C-04, frontend.md FC-05) ──────────────────────
+
+/** Pass refresh: the server's passes last 2 minutes; a fresh one every minute keeps the QR valid. */
+export const PASS_REFRESH_MS = 60_000;
+
+/** POST /bookings/:id/pass (the borrower) → envelope; data { token, code, expiresAt, issuedAt, phase, verifiedAt }. */
+export async function getBookingPass(id) {
+  const res = await http.post(`/bookings/${encodeURIComponent(id)}/pass`);
+  return res.data;
+}
+
+/** GET /bookings/:id/pass (the borrower) → envelope; data { phase, verifiedAt }: the light read to poll. */
+export async function getPassStatus(id) {
+  const res = await http.get(`/bookings/${encodeURIComponent(id)}/pass`);
+  return res.data;
+}
+
+/** POST /bookings/scan { token } | { code } (the unit's managers) → envelope; data { booking, phase, next, isOverdue, verifiedAt, recorded }. */
+export async function scanBookingPass(body) {
+  const res = await http.post('/bookings/scan', body);
+  return res.data;
+}
+
+/** How often an open, not yet verified pass asks whether the unit has scanned it. */
+export const PASS_STATUS_POLL_MS = 15_000;
+
+/**
+ * The borrower's pass while it's on screen, refetched every minute (`refresh: false` stops that, once
+ * the pass has been verified). Never cached once closed.
+ */
+export function useBookingPass(id, { enabled = true, refresh = true } = {}) {
+  return useQuery({
+    queryKey: [...bookingKeys.detail(id), 'pass'],
+    queryFn: () => getBookingPass(id),
+    enabled: Boolean(id) && enabled,
+    staleTime: 0,
+    gcTime: 0,
+    refetchInterval: refresh ? PASS_REFRESH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: retryReads,
+  });
+}
+
+/** Whether the unit has verified the pass: polled while the pass is open, until it's verified. */
+export function usePassStatus(id, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...bookingKeys.detail(id), 'pass-status'],
+    queryFn: () => getPassStatus(id),
+    enabled: Boolean(id) && enabled,
+    staleTime: 0,
+    // Stops by itself once the answer says it's verified.
+    refetchInterval: (query) => (query.state.data?.data?.verifiedAt ? false : PASS_STATUS_POLL_MS),
+    refetchIntervalInBackground: false,
+    retry: retryReads,
+  });
+}
+
+/** A scan: the booking's lists and timeline change (an audit entry), so refresh them. */
+export function useScanPass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: scanBookingPass,
+    onSuccess: (envelope) => {
+      const id = envelope?.data?.booking?._id;
+      if (id) queryClient.invalidateQueries({ queryKey: bookingKeys.timeline(String(id)) });
+    },
+  });
+}
+
 /** GET /bookings/:id/timeline under ['booking', id, 'timeline']. data: { data: [items] }. */
 export function useTimeline(id, options = {}) {
   return useQuery({

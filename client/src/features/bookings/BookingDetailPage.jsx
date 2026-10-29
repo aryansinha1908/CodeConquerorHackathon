@@ -10,6 +10,8 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { formatIstDateTime, formatIstTime, formatRelative } from '../../lib/time';
 import { canDo, checkInOpensAt, idOf, isBorrower, useBooking, useCancelBooking, useTimeline } from './api';
+import { PassCard } from './components/PassCard';
+import { PASS_STATUSES } from './components/passView';
 import { ActionBar } from './components/ActionBar';
 import { CancelBookingDialog } from './components/CancelBookingDialog';
 import { ConditionReports } from './components/ConditionReports';
@@ -288,6 +290,11 @@ export default function BookingDetailPage() {
           <div data-tour="booking-actions">
             <ActionBar booking={booking} user={user} now={now} onCancel={openCancel} />
           </div>
+
+          {/* The QR pass (FC-05): the borrower's to show at pickup and return. */}
+          {isBorrower(booking, user) && PASS_STATUSES.includes(booking.status) && (
+            <PassCard booking={booking} title={title} />
+          )}
 
           <div data-tour="booking-status" className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
             <DetailsCard booking={booking} user={user} />

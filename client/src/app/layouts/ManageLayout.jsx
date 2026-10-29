@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Layers, ClipboardList, Clock, AlertTriangle, Award } from 'lucide-react';
+import { LayoutDashboard, Layers, ClipboardList, Clock, AlertTriangle, Award, ScanLine } from 'lucide-react';
 
 export function ManageLayout() {
   // Dark text on the amber tab (6.1:1): white on #e67e22 is 2.85:1, under frontend.md §10.3's 4.5:1.
@@ -33,6 +33,10 @@ export function ManageLayout() {
           <NavLink to="/manage/handovers" className={subnavClass}>
             <Clock className="w-3.5 h-3.5" aria-hidden="true" />
             Handovers
+          </NavLink>
+          <NavLink to="/manage/scan" className={subnavClass}>
+            <ScanLine className="w-3.5 h-3.5" aria-hidden="true" />
+            Scan pass
           </NavLink>
           <NavLink to="/manage/resources" className={subnavClass}>
             <Layers className="w-3.5 h-3.5" aria-hidden="true" />

@@ -47,7 +47,8 @@ export const TOURS = [
     path: '/bookings/:id',
     title: 'A booking',
     steps: [
-      { target: 'booking-actions', title: 'What you can do now', text: 'Cancel, check in (from 15 minutes before the start), check out, or report an issue. At pickup, show the unit your QR pass.' },
+      { target: 'booking-actions', title: 'What you can do now', text: 'Cancel, check in (from 15 minutes before the start), check out, or report an issue.' },
+      { target: 'booking-pass', title: 'Your QR pass', text: 'At pickup and return, show this to the unit. They scan it to confirm it\u2019s you, at the right time.' },
       { target: 'booking-status', title: 'Status and decision', text: 'Where the booking stands, and the reason a manager gave for any decision.' },
       { target: 'booking-reports', title: 'Condition reports', text: 'The checklist and photos from check-in and check-out.' },
       { target: 'booking-history', title: 'Full history', text: 'Every step, who took it and when. Nothing is ever deleted.' },

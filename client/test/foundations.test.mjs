@@ -1467,7 +1467,7 @@ test('ManageLayout: Dashboard leads the sub-nav, active on /manage only; icons a
   const nav = navOf(html, 'Management');
   assert.deepEqual(
     [...nav.matchAll(/<a[^>]*href="([^"]+)"/g)].map((m) => m[1]),
-    ['/manage', '/manage/requests', '/manage/handovers', '/manage/resources', '/manage/badges', '/manage/incidents'],
+    ['/manage', '/manage/requests', '/manage/handovers', '/manage/scan', '/manage/resources', '/manage/badges', '/manage/incidents'],
   );
   assert.match(text(nav), /^Dashboard Review Queue/);
   const [active, ...more] = activeTab(html);
@@ -1476,7 +1476,7 @@ test('ManageLayout: Dashboard leads the sub-nav, active on /manage only; icons a
   const tab = colours(active.match(/class="([^"]*)"/)[1]);
   assert.ok(contrast(tab.bg, tab.fg) >= 4.5, `active tab: ${contrast(tab.bg, tab.fg).toFixed(2)}:1`);
   const icons = nav.match(/<svg[^>]*>/g);
-  assert.equal(icons.length, 6);
+  assert.equal(icons.length, 7, "Dashboard, Review Queue, Handovers, Scan pass, Unit Resources, Badges, Incidents");
   for (const icon of icons) assert.match(icon, /aria-hidden="true"/);
 
   // `end`: on a page under /manage, only that page's tab is active, not the dashboard's too.

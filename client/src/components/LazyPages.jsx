@@ -23,6 +23,7 @@ export const BookingDetailPage = lazy(() => import('../features/bookings/Booking
 export const HandoverPage = lazy(() => import('../features/bookings/HandoverPage'));
 export const RequestsPage = lazy(() => import('../features/manage/RequestsPage'));
 export const HandoversPage = lazy(() => import('../features/manage/HandoversPage'));
+export const ScanPage = lazy(() => import('../features/manage/ScanPage'));
 export const ReturnConfirmPage = lazy(() => import('../features/manage/ReturnConfirmPage'));
 export const DashboardPage = lazy(() => import('../features/manage/DashboardPage'));
 export const ResourcesPage = lazy(() => import('../features/manage/ResourcesPage'));

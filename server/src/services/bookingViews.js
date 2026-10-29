@@ -97,6 +97,8 @@ const VERBS = {
       : "confirmed the return",
   "booking.flagged": () => "reported an issue on return",
   "booking.overdue": () => "flagged the return as overdue",
+  "booking.pass_verified": (e) =>
+    e.meta?.phase === "return" ? "verified the borrower's pass at return" : "verified the borrower's pass at pickup",
 };
 
 // 'Manager (DIC) rejected: "Printer reserved for the M.Des jury"' (backend.md §8.1)

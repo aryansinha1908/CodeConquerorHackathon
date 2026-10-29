@@ -24,6 +24,7 @@ import {
   transition,
 } from "../services/bookingService.js";
 import { assertValid } from "../services/params.js";
+import { issuePass, passStatus, scanPass } from "../services/passService.js";
 import { photoProblems } from "../services/uploadService.js";
 
 const router = express.Router();
@@ -65,6 +66,25 @@ router.post(
     sendData(req, res, created, { status: 201 });
   },
 );
+
+// ── QR booking pass (backend.md C-04) ───────────────────────────────────────
+
+// { token } (the scanned QR) or { code } (typed) → { booking, phase, next, verifiedAt }, for a
+// manager of the booking's unit or an admin; never the borrower. Audited as booking.pass_verified.
+router.post("/scan", verifyAuth, generalLimiter, blockSuspended, async (req, res) => {
+  sendData(req, res, await scanPass(bodyOf(req), req.user.id, options(req)));
+});
+
+// → { token, code, expiresAt, phase }: a fresh 2-minute pass for the borrower to show. Not behind
+// blockSuspended: showing a pass changes nothing, and a suspended borrower still returns what they have.
+router.post("/:id/pass", verifyAuth, generalLimiter, async (req, res) => {
+  sendData(req, res, await issuePass(req.params.id, req.user.id));
+});
+
+// → { phase, verifiedAt }: whether the unit has verified the pass, for the open card to poll cheaply.
+router.get("/:id/pass", verifyAuth, generalLimiter, async (req, res) => {
+  sendData(req, res, await passStatus(req.params.id, req.user.id));
+});
 
 // ── Lists (static paths before /:id) ──────────────────────────────────────
 

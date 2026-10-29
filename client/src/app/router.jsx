@@ -37,6 +37,7 @@ import {
   ResourceDetailPage,
   ResourceFormPage,
   ResourcesPage,
+  ScanPage,
   ReturnConfirmPage,
   VerificationPage,
   VerificationQueuePage,
@@ -132,6 +133,8 @@ export const router = createBrowserRouter([
           { index: true, element: page(<DashboardPage />) },
           { path: 'requests', element: page(<RequestsPage />) },
           { path: 'handovers', element: page(<HandoversPage />) },
+          // The QR booking pass, the unit's side (FC-05).
+          { path: 'scan', element: page(<ScanPage />) },
           { path: 'returns/:bookingId', element: page(<ReturnConfirmPage />) },
           { path: 'resources', element: page(<ResourcesPage />) },
           { path: 'resources/new', element: page(<ResourceFormPage key="new" mode="new" />) },

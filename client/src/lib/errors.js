@@ -31,7 +31,8 @@ export function errorMessage(err) {
     return "We couldn't reach the server. Check your connection and try again.";
   }
   const base = err.message || 'Something went wrong.';
-  if (err.code === 'RATE_LIMITED' && err.retryAfter) {
+  // Some 429 messages already say when ("Try again in 3 minutes."): don't say it twice.
+  if (err.code === 'RATE_LIMITED' && err.retryAfter && !/try again in/i.test(base)) {
     return `${base} Try again in ${err.retryAfter} s.`;
   }
   return base;
