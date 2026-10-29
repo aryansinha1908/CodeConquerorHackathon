@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Compass, Cpu, Sparkles } from 'lucide-react';
+import { FadeUp, StaggerItem, StaggerList } from '../components/Motion';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Pagination } from '../components/ui/Pagination';
@@ -69,7 +70,7 @@ export default function ExplorePage() {
 
   return (
     <div className="space-y-8 font-mono text-[#1a1a1a]">
-      <section className="relative overflow-hidden rounded-xl border-2 border-[#1a1a1a] bg-[#183d2d] text-white p-6 md:p-8 shadow-[6px_6px_0_#1a1a1a]">
+      <FadeUp as="section" className="relative overflow-hidden rounded-xl border-2 border-[#1a1a1a] bg-[#183d2d] text-white p-6 md:p-8 shadow-[6px_6px_0_#1a1a1a]">
         <div aria-hidden="true" className="absolute top-0 right-0 w-32 h-32 pointer-events-none select-none opacity-20">
           <div className="absolute top-3 right-3 w-6 h-6 bg-[#c0392b]" />
           <div className="absolute top-3 right-11 w-6 h-6 bg-white" />
@@ -99,7 +100,7 @@ export default function ExplorePage() {
             </li>
           </ul>
         </div>
-      </section>
+      </FadeUp>
 
       <ResourceFilters
         filters={filters}
@@ -175,16 +176,19 @@ export default function ExplorePage() {
 
         {items.length > 0 && (
           <>
-            <ul
+            {/* Keyed by the page of the cards shown (the list keeps the previous page's cards while the
+                next loads), so the next page's cards come in one after another once they arrive. */}
+            <StaggerList
+              key={meta?.page ?? filters.page}
               aria-busy={list.isFetching || undefined}
-              className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${list.isPlaceholderData ? 'opacity-60' : ''}`}
+              className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}
             >
               {items.map((resource) => (
-                <li key={resource._id}>
+                <StaggerItem key={resource._id}>
                   <ResourceCard resource={resource} />
-                </li>
+                </StaggerItem>
               ))}
-            </ul>
+            </StaggerList>
             <Pagination
               page={filters.page}
               pageCount={pages}

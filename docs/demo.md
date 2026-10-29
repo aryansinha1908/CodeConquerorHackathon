@@ -30,7 +30,7 @@ cd client && npm run dev      # app on http://localhost:5173
 Then:
 - <http://localhost:5000/health> should say `"mongo":"up","redis":"up"`.
 - Open <http://localhost:5173>.
-- To switch users, sign out from the header and press another demo button.
+- To switch users, click your name at the right of the header → **Log out**, then press another demo button.
 - To have two people signed in at once, use a second browser or a private window.
 
 **What your current `.env` leaves out, and what that changes:**
@@ -140,7 +140,8 @@ The twelve steps from `frontend.md` §11. They cross every role and most of the 
 | **ID verification (member)** | After verifying the email, the new account lands on `/verification` | Upload a student or faculty ID card (needs Cloudinary). The status card shows pending / approved / rejected with the reason. Until approved, the eligibility checklist fails *Account verified* |
 | **Login lockout** | Log in as a demo email with a wrong password 5 times | A 429 with a **live countdown** (15 minutes, per email). Only failures count. A right password on an unverified account doesn't count |
 | **Demo login** | The role buttons | One click per role. They only appear while `DEMO_MODE=true` |
-| **Session** | Stay idle past 15 minutes, then click around | The 15-minute access token renews silently from the rotating refresh cookie. Sign out ends the session |
+| **Session** | Stay idle past 15 minutes, then click around | The 15-minute access token renews silently from the rotating refresh cookie. Log out ends the session |
+| **Account menu and profile** | Click your name at the right of the header | A menu: **Profile**, **ID verification** (with its status), **Admin console** (admins only), **Log out**. **Profile** (`/profile`) shows your details, verification status (and the reason if rejected), your badges, strikes or a suspension if any, and links to the consoles your roles open. Below 1024 px wide, the same items sit in the ☰ menu |
 
 ### 4.2 Finding resources (any member)
 
@@ -201,6 +202,8 @@ The twelve steps from `frontend.md` §11. They cross every role and most of the 
 
 ### 4.7 Admin
 
+The **Admin console** opens from the account menu: your name at the right of the header → **Admin console**, or **Profile → Consoles**.
+
 | Try | How | Expect |
 |---|---|---|
 | **Verification queue** | **Admin → Verifications** | Rohan Mehta, pending, with the email hints. **View ID** opens the card through a 5-minute signed link, "Viewing is logged" (needs Cloudinary). **Approve** (confirm member type and department) or **Reject** with a reason, which the member sees on `/verification` |
@@ -253,7 +256,7 @@ The last command answers `201` with `"state":"requested"`. The request then appe
 So you don't look for these in a demo:
 
 - **The member's `/badges` page** (the teammate's): shows a placeholder. Use [§5](#5-requesting-a-badge-without-the-badges-page) or the manager's **Grant directly**.
-- **`/profile`**, **`/how-it-works`**, **`/admin/users`** and **`/admin/org-units` pages.** Their APIs partly exist (`GET /admin/users`, the org-unit routes); `/admin/*` opens the verification queue.
+- **`/how-it-works`**, **`/admin/users`** and **`/admin/org-units` pages.** Their APIs partly exist (`GET /admin/users`, the org-unit routes); `/admin/*` opens the verification queue. `/profile` has no quota overview or email-notification toggle yet.
 - **Email for booking events.** Notifications are in-app only; only sign-up codes are emailed, and only with SMTP set.
 - **Revoking a badge**, and acting on strikes (they're counted, nothing suspends automatically).
 - **The cool-to-have features** in `frontend.md` §3 and `backend.md`, including every AI feature.

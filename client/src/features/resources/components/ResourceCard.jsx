@@ -1,7 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { ArrowRight, Award, Building2, Clock, MapPin, Zap } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
+import { hoverLift } from '../../../lib/motion';
 import {
   approvalView,
   bookingModeLabel,
@@ -15,14 +17,15 @@ import {
 
 // One resource in Explore's grid: a Card from GET /resources (api.md "Resources"). Shows the unit,
 // risk level, approval mode, badges needed, location (an object, formatted) and the opening hours
-// the server wrote ("Mon–Sat 09:00–17:00"). The title is the card's one link to the detail page,
-// plus an explicit "View and book" link; no button sits inside a link.
+// the server wrote ("Mon–Sat 09:00–17:00"). The whole card opens the detail page: the title is the
+// card's one link, stretched over the card by its ::after box, so a click anywhere lands on it and
+// a screen reader or Tab meets one link per card, named by the title. "View and book" only looks
+// like a button (aria-hidden); no button sits inside a link.
 
-const linkClass =
+const ctaClass =
   'inline-flex items-center justify-center gap-1.5 font-bold font-mono tracking-tight border-2 border-[#1a1a1a] ' +
   'px-3 py-2 min-h-[40px] text-xs rounded-md bg-[#c0392b] text-white shadow-[3px_3px_0px_0px_#1a1a1a] ' +
-  'hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px] transition-all ' +
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a1a1a] focus-visible:ring-offset-2';
+  'transition-all group-hover:shadow-[1px_1px_0px_0px_#1a1a1a] group-hover:translate-x-[2px] group-hover:translate-y-[2px]';
 
 export function ResourceCard({ resource, headingLevel = 'h3' }) {
   const Heading = headingLevel;
@@ -39,7 +42,10 @@ export function ResourceCard({ resource, headingLevel = 'h3' }) {
   const unit = resource.orgUnit && typeof resource.orgUnit === 'object' ? resource.orgUnit : null;
 
   return (
-    <article className="h-full rounded-xl border-2 border-[#1a1a1a] bg-white font-mono text-[#1a1a1a] shadow-[4px_4px_0_#1a1a1a] flex flex-col overflow-hidden">
+    <motion.article
+      {...hoverLift}
+      className="group relative h-full cursor-pointer rounded-xl border-2 border-[#1a1a1a] bg-white font-mono text-[#1a1a1a] shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] transition-shadow flex flex-col overflow-hidden has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-[#c0392b] has-[a:focus-visible]:ring-offset-2"
+    >
       {image && (
         <img
           src={image.url}
@@ -67,7 +73,7 @@ export function ResourceCard({ resource, headingLevel = 'h3' }) {
           <Heading className="text-base font-black tracking-tight leading-snug break-words">
             <Link
               to={href}
-              className="hover:text-[#a93226] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] rounded-sm"
+              className="group-hover:text-[#a93226] group-hover:underline focus-visible:outline-none after:absolute after:inset-0 after:content-['']"
             >
               {resource.title}
             </Link>
@@ -134,12 +140,12 @@ export function ResourceCard({ resource, headingLevel = 'h3' }) {
         </div>
 
         <div className="mt-auto pt-3 border-t-2 border-[#1a1a1a]/10 flex justify-end">
-          <Link to={href} className={linkClass} aria-label={`View and book ${resource.title}`}>
+          <span className={ctaClass} aria-hidden="true">
             View and book
-            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-          </Link>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </span>
         </div>
       </div>
-    </article>
+    </motion.article>
   );
 }

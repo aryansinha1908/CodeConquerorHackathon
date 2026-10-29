@@ -18,6 +18,7 @@ import {
   useNotifications,
 } from './api';
 import { NotificationItem } from './components/NotificationItem';
+import { StaggerList } from '../../components/Motion';
 
 // /notifications (frontend.md §6.2): the signed-in user's notifications, newest first, with an
 // unread filter, "Mark read" (optimistic, frontend.md §8.2) and "Mark all read" (waits for the
@@ -247,7 +248,7 @@ export default function NotificationsPage() {
       )}
 
       {items.length > 0 && (
-        <ul aria-label={filter.unread ? 'Unread notifications' : 'Notifications'} className={`space-y-3 ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
+        <StaggerList step={0.04} aria-label={filter.unread ? 'Unread notifications' : 'Notifications'} className={`space-y-3 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
           {items.map((notification) => (
             <NotificationItem
               key={notification._id}
@@ -256,7 +257,7 @@ export default function NotificationsPage() {
               now={now}
             />
           ))}
-        </ul>
+        </StaggerList>
       )}
 
       <Pagination

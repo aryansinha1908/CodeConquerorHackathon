@@ -22,6 +22,7 @@ import { QueueItem } from './components/QueueItem';
 import { IdCardDialog } from './components/IdCardDialog';
 import { DecisionDialog } from './components/DecisionDialog';
 import { RequestError } from './components/RequestError';
+import { StaggerList } from '../../components/Motion';
 
 // /admin/verifications (frontend.md §6.4, F-15; architecture.md §8): the ID-verification queue.
 // Status and page live in the URL so a filtered page can be linked and survives a reload.
@@ -263,7 +264,7 @@ export default function VerificationQueuePage() {
             </span>
             {list.isFetching && <span aria-hidden="true">Updating…</span>}
           </div>
-          <ul className={`space-y-4 ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
+          <StaggerList className={`space-y-4 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
             {items.map((item) => (
               <QueueItem
                 key={item.user._id}
@@ -274,7 +275,7 @@ export default function VerificationQueuePage() {
                 onDecide={openDecision}
               />
             ))}
-          </ul>
+          </StaggerList>
         </>
       )}
 

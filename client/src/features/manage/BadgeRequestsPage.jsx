@@ -37,6 +37,7 @@ import {
 import { BadgeRequestCard } from './badges/BadgeRequestCard';
 import { EvidenceDialog } from './badges/EvidenceDialog';
 import { GrantDialog } from './badges/GrantDialog';
+import { StaggerList } from '../../components/Motion';
 
 // /manage/badges (frontend.md §6.3; judge step 4): the badge requests of the units this manager
 // runs (an admin sees every unit), from GET /badge-requests. The status filter and page live in the
@@ -290,14 +291,14 @@ export default function BadgeRequestsPage() {
       )}
 
       {rows.length > 0 && (
-        <ul
+        <StaggerList
           aria-label={`${filterLabel} badge requests`}
-          className={`space-y-4 ${queue.isPlaceholderData ? 'opacity-60' : ''}`}
+          className={`space-y-4 transition-opacity ${queue.isPlaceholderData ? 'opacity-60' : ''}`}
         >
           {rows.map((row) => (
             <BadgeRequestCard key={row._id} row={row} user={user} onView={openEvidence} onDecide={openDecision} />
           ))}
-        </ul>
+        </StaggerList>
       )}
 
       <Pagination

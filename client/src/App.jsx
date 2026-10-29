@@ -1,6 +1,7 @@
 import React from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
+import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
 
 import { queryClient } from "./app/queryClient";
@@ -9,7 +10,10 @@ import { router } from "./app/router";
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {/* "user": with the OS's reduce-motion setting on, transforms are skipped and only fades run. */}
+      <MotionConfig reducedMotion="user">
+        <RouterProvider router={router} />
+      </MotionConfig>
       <Toaster
         position="top-right"
         toastOptions={{

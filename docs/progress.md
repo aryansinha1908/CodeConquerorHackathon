@@ -2,9 +2,7 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11) are committed locally on `Aryan` as `d839a57` … `3f68dd2` and **not pushed** (`origin/Aryan` is still at `4533665`). The judge script passes end to end (`npm run golden-path`).
-
-**Uncommitted in the working tree:** `docs/deploy.md` (table re-alignment only, probably an editor's Prettier), `server/scripts/check-redis.cjs` and the `check:redis` script in `server/package.json` (see "Local setup" below); `docs/demo.md` (the manual demo and testing guide, linked from the README).
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11), the local-setup fixes (`b9005b3`) and the UI fixes from the first review (§11, step 6) are committed locally on `Aryan` and **not pushed** (`origin/Aryan` is still at `4533665`). The judge script passes end to end (`npm run golden-path`).
 
 **Resume here:** §11's "Open" list, after fixing the local setup below.
 
@@ -300,6 +298,38 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
    - **Deploy:** `render.yaml`, `client/vercel.json` (SPA fallback, `/api` rewrite, CSP and security headers), `docs/deploy.md` (step-by-step checklist, including the secret rotation), and a real `README.md`.
    - **Review:** 10 findings (1 high: with one trusted hop, everyone behind Vercel shared one IP bucket), 7 fixed, 2 duplicates, 2 deferred (below).
    - **Tests:** 738 server tests and 308 client tests; the golden path passes 12/12 after the hardening.
+6. ✅ **UI fixes from the first review of the running app** (client only).
+   - **Navbar:** Explore, Bookings, Badges and Manage (managers), from `lg`; the hamburger below. The name at the right opens the new account menu (`components/UserMenu.jsx`, lazy like the bell): Profile, ID verification, Admin console (admins), Log out. Logout moved to `features/auth/useLogout.js`.
+   - **`/profile`** (`features/profile/`): details, verification, my badges (`GET /badges/mine` under `['badges', 'mine']`), strikes and suspension, console links. It re-reads `GET /auth/me` on opening.
+   - **Fixes:**
+     - The bell's "See all" was white on white: `cn()` only joins strings, so `bg-white` and the green were on one element. Each footer action now has one background.
+     - Explore's filter box grew when a filter came on: "Clear filters" is now always rendered (hidden and inert with no filters).
+     - Explore cards are clickable as a whole: one stretched title link.
+     - The resource page's left column (rules, who can book, limits, checklist) is sticky with its own scroll.
+     - A global `:focus-visible` rule ringed whole menus; menus are exempt now.
+   - **framer-motion:** presets in `lib/motion.js`, `StaggerList` / `StaggerItem` / `FadeUp` in `components/Motion.jsx`. Where:
+     - page entrance (in `LazyPage`);
+     - list staggers (bookings, notifications, incidents, requests, badge queue, verification queue, dashboard, timeline);
+     - card hover lift;
+     - sliding active indicators (nav, category pills);
+     - menu and dialog entrances;
+     - the unread badge pop;
+     - auth pages.
+
+     `MotionConfig reducedMotion="user"`. Its own 45 kB (gzip) vendor chunk.
+   - **Blocked:** the teammate's background image (not in the repo yet).
+   - **Review:** 10 findings, all reproduced first (a browser check or a failing test), then fixed:
+     - a whileTap on the card's `<article>` made framer give it a tab stop;
+     - the nav's shared-layout box flew in from the scroll position, so it is now placed from offsets within the nav;
+     - the mobile menu stayed open after other navigation;
+     - the profile's `/auth/me` re-read could restore the user after a logout;
+     - Explore's next page replayed the old cards;
+     - non-item content in the account menu;
+     - "Clear filters" classes fighting Button's own;
+     - CSS transitions chasing framer's transforms;
+     - contradictory staff wording on /profile;
+     - the shared `['badges', 'mine']` cache shape.
+   - **Tests:** 319 client tests (309 + 10 new: profile, the account menu and its panel, the logout race, card link, filter box, "See all"). Server untouched.
 
 **Open, in priority order:**
 1. **The member's `/badges` page (teammate).** Judge step 3, a student requesting a badge, can't be done in the UI until it lands: the API is ready (`POST /badges/:id/requests`, `GET /badges/mine`; see `docs/api.md`) and the eligibility checklist already links to `/badges?request=<code>`. If it doesn't arrive, it's a small page to build.

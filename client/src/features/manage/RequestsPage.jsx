@@ -29,6 +29,7 @@ import {
   requesterView,
   slotText,
 } from './components/manageView';
+import { StaggerList } from '../../components/Motion';
 
 // /manage/requests (frontend.md §6.3, F-11; judge step 7): GET /bookings/manage?status=pending
 // returns conflict groups, one card per contested slot with every request in it. Approve takes an
@@ -244,7 +245,7 @@ export default function RequestsPage() {
       )}
 
       {groups.length > 0 && (
-        <ul className={`space-y-5 ${queue.isPlaceholderData ? 'opacity-60' : ''}`}>
+        <StaggerList step={0.07} className={`space-y-5 transition-opacity ${queue.isPlaceholderData ? 'opacity-60' : ''}`}>
           {groups.map((group, index) => (
             <ConflictGroupCard
               key={groupKey(group, index)}
@@ -253,7 +254,7 @@ export default function RequestsPage() {
               onDecide={openDecision}
             />
           ))}
-        </ul>
+        </StaggerList>
       )}
 
       <Pagination

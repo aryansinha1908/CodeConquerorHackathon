@@ -16,6 +16,7 @@ import {
   requesterView,
   slotText,
 } from './manageView';
+import { StaggerItem, StaggerList } from '../../../components/Motion';
 
 const asText = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
 
@@ -36,7 +37,7 @@ export function RequestRow({ booking, position, oldestPending, user, onDecide })
   const who = <span className="sr-only"> {person.name}&apos;s request</span>;
 
   return (
-    <li
+    <StaggerItem
       className={`rounded-lg border-2 p-3 sm:p-4 space-y-3 ${
         pending ? 'border-[#1a1a1a] bg-white' : 'border-[#1a1a1a]/30 bg-[#f5f0e8]'
       }`}
@@ -127,7 +128,7 @@ export function RequestRow({ booking, position, oldestPending, user, onDecide })
             </Button>
           </div>
         ))}
-    </li>
+    </StaggerItem>
   );
 }
 
@@ -149,7 +150,7 @@ export function ConflictGroupCard({ group, user, onDecide, headingLevel = 3 }) {
   const headingId = `group-${idOf(group?.resource) ?? 'r'}-${idOf(bookings[0]) ?? 'b'}`;
 
   return (
-    <li>
+    <StaggerItem>
       <Card className="p-4 sm:p-5" aria-labelledby={headingId} role="group">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-3 mb-3 border-b-2 border-[#1a1a1a]/15">
           <div className="min-w-0">
@@ -175,7 +176,8 @@ export function ConflictGroupCard({ group, user, onDecide, headingLevel = 3 }) {
               ' Only one of these can hold the slot: approve one, then reject or waitlist the rest.'}
           </p>
         )}
-        <ol className="space-y-3" aria-label={`Requests for ${title}, oldest first`}>
+        {/* The requests come in oldest first, after the card. */}
+        <StaggerList as="ol" step={0.06} delay={0.1} className="space-y-3" aria-label={`Requests for ${title}, oldest first`}>
           {bookings.map((booking, index) => (
             <RequestRow
               key={idOf(booking) ?? index}
@@ -186,8 +188,8 @@ export function ConflictGroupCard({ group, user, onDecide, headingLevel = 3 }) {
               onDecide={onDecide}
             />
           ))}
-        </ol>
+        </StaggerList>
       </Card>
-    </li>
+    </StaggerItem>
   );
 }

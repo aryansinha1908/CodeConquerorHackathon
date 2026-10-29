@@ -16,6 +16,7 @@ import {
   TriangleAlert,
   Users,
 } from 'lucide-react';
+import { FadeUp, StaggerItem, StaggerList } from '../components/Motion';
 import { Badge } from '../components/ui/Badge';
 import { LinkButton } from '../features/manage/components/Bits';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -86,15 +87,16 @@ function DetailSkeleton() {
   );
 }
 
+// A card of the left column; it rises in after the one above it (the column is a StaggerList).
 function SectionCard({ icon: Icon, title, children }) {
   return (
-    <section className={cardClass}>
+    <StaggerItem as="section" className={cardClass}>
       <h2 className="text-base font-black tracking-tight flex items-center gap-2 mb-3">
         <Icon className="w-4 h-4 text-[#183d2d]" aria-hidden="true" />
         {title}
       </h2>
       {children}
-    </section>
+    </StaggerItem>
   );
 }
 
@@ -369,10 +371,21 @@ export function ResourceDetail({ resource }) {
         </p>
       </nav>
 
-      <Header resource={resource} />
+      <FadeUp>
+        <Header resource={resource} />
+      </FadeUp>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-5 space-y-6">
+        {/* The rules stay in view while the booking side scrolls: sticky below the header from lg.
+            At most the screen less the header above and the footer's share below (15rem), so even
+            at the end of the page, where the grid stops, the whole column stays below the header;
+            taller content scrolls inside it. The padding keeps the cards' offset shadows inside
+            that scroll box. */}
+        <StaggerList
+          as="div"
+          step={0.06}
+          className="lg:col-span-5 space-y-6 lg:sticky lg:top-24 lg:max-h-[calc(100vh-15rem)] lg:overflow-y-auto lg:pr-2 lg:pb-2 [scrollbar-width:thin] [scrollbar-color:#1a1a1a66_transparent]"
+        >
           <SectionCard icon={ScrollText} title="Usage rules">
             {resource.usageRules ? (
               <p className="text-sm leading-relaxed whitespace-pre-line break-words">{resource.usageRules}</p>
@@ -408,12 +421,16 @@ export function ResourceDetail({ resource }) {
             </SectionCard>
           )}
           <Closures blackouts={resource.availability?.blackouts} />
-        </div>
+        </StaggerList>
 
-        <div className="lg:col-span-7 space-y-6">
-          <EligibilityCard resource={resource} />
-          <BookingArea resource={resource} />
-        </div>
+        <StaggerList as="div" step={0.08} delay={0.05} className="lg:col-span-7 space-y-6">
+          <StaggerItem as="div">
+            <EligibilityCard resource={resource} />
+          </StaggerItem>
+          <StaggerItem as="div">
+            <BookingArea resource={resource} />
+          </StaggerItem>
+        </StaggerList>
       </div>
     </div>
   );

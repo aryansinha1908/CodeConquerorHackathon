@@ -101,6 +101,11 @@ body {
   outline: 2px solid var(--color-hf-red);
   outline-offset: 2px;
 }
+/* A menu's own box takes focus while it is open, but the focused item shows the focus (its
+   data-focus style), so a ring around the whole menu would only be noise. */
+[role="menu"]:focus-visible {
+  outline: none;
+}
 
 /* ── Animations ── */
 @keyframes fadeSlideIn {
