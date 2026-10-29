@@ -24,7 +24,7 @@ const schema = z.object({
 
 const FIELDS = ['email', 'password'];
 const DEFAULT_NEXT = '/explore';
-const AUTH_PAGES = ['/login', '/register', '/verify-otp'];
+const AUTH_PAGES = ['/login', '/register', '/verify-otp', '/forgot-password', '/reset-password'];
 
 // ?next= comes from the URL, so only same-site paths are followed.
 function safeNext(value) {
@@ -191,6 +191,12 @@ export default function LoginPage() {
             {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
+
+        <p className="-mt-3 text-right text-sm font-mono">
+          <Link to="/forgot-password" className="font-bold text-[#c0392b] underline underline-offset-2 hover:text-[#a93226]">
+            Forgot password?
+          </Link>
+        </p>
 
         {/* Submit */}
         <Button

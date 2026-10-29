@@ -6,6 +6,7 @@ const normaliseEmail = (email) => String(email).trim().toLowerCase();
 export const keys = {
   otp: (email) => `otp:${normaliseEmail(email)}`,
   otpTries: (email) => `otp:tries:${normaliseEmail(email)}`,
+  passwordReset: (tokenHash) => `auth:password-reset:${tokenHash}`,
   // One key per session (a refresh-token family); the value is the family's current jti.
   refreshFamily: (userId, familyId) => `auth:refresh:${userId}:${familyId}`,
   // Prefix for the rate-limit store; it appends the user id, email, role or IP itself.
@@ -32,6 +33,7 @@ export const keys = {
 // *Seconds are for EX, *Ms for PX.
 export const TTL = {
   otpSeconds: 10 * 60,
+  passwordResetSeconds: 30 * 60,
   refreshTokenSeconds: 7 * 24 * 60 * 60,
   resourceLockMs: 5_000,
   sweepLockMs: 4 * 60 * 1000,

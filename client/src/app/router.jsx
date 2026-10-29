@@ -13,6 +13,8 @@ import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 import LoginPage from '../features/auth/LoginPage';
 import RegisterPage from '../features/auth/RegisterPage';
 import VerifyOtpPage from '../features/auth/VerifyOtpPage';
+import ForgotPasswordPage from '../features/auth/ForgotPasswordPage';
+import ResetPasswordPage from '../features/auth/ResetPasswordPage';
 import HomePage from '../pages/HomePage';
 
 // Lazy loaded pages (declared in components/LazyPages.jsx, a components-only module)
@@ -75,6 +77,14 @@ export const router = createBrowserRouter([
         <VerifyOtpPage />
       </ErrorBoundary>
     ),
+  },
+  {
+    path: '/forgot-password',
+    element: <ErrorBoundary><ForgotPasswordPage /></ErrorBoundary>,
+  },
+  {
+    path: '/reset-password',
+    element: <ErrorBoundary><ResetPasswordPage /></ErrorBoundary>,
   },
 
   // ── Authenticated App Shell ─────────────────────────────────────────────────

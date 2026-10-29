@@ -13,10 +13,12 @@
 // account once the real owner typed in the code. verify-otp therefore also needs the sign-up proof:
 // a cookie set by register, and by a login with the right password, that is only good for the
 // password the account has now. The route moves it between the cookie and these functions.
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { sendMail } from "../config/mailer.js";
+import { getRedis } from "../config/redis.js";
 import { log } from "../lib/log.js";
+import { keys, TTL } from "../lib/redisKeys.js";
 import { ServiceError } from "../lib/serviceError.js";
 import { formatDuration } from "../lib/time.js";
 import {
@@ -220,6 +222,25 @@ export function readLoginInput(body) {
   else clean.password = password;
   assertValid(problems, "field");
   return clean;
+}
+
+export function readPasswordResetRequestInput(body) {
+  const problems = [];
+  const clean = { email: readEmail(asBody(body).email, problems, "code") };
+  assertValid(problems, "field");
+  return clean;
+}
+
+export function readPasswordResetInput(body) {
+  const { token, password } = asBody(body);
+  const problems = [];
+  let cleanToken;
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token))
+    problems.push({ path: "token", message: "This reset link is invalid or expired." });
+  else cleanToken = token;
+  const cleanPassword = readNewPassword(password, problems);
+  assertValid(problems, "field");
+  return { token: cleanToken, password: cleanPassword };
 }
 
 export function readDemoInput(body) {
@@ -481,6 +502,69 @@ export async function resendOtp(input) {
       log.error({ err, userId: String(user._id) }, "Couldn't resend an OTP"),
     );
   return { sent: true, retryAfter: OTP_RETRY_AFTER_SECONDS };
+}
+
+const passwordResetStoreDown = () =>
+  new ServiceError(503, "SERVICE_UNAVAILABLE", "Password reset is temporarily unavailable. Try again in a minute.");
+
+// Always answers identically for valid campus emails. The opaque token is stored only by its hash,
+// expires in 30 minutes, and is consumed atomically before a password can be changed.
+export async function requestPasswordReset(input) {
+  const { email } = readPasswordResetRequestInput(input);
+  let user;
+  try {
+    user = await User.findOne({ email }).select("_id email").lean();
+    const token = randomBytes(32).toString("base64url");
+    const digest = createHash("sha256").update(token).digest("hex");
+    await getRedis().set(
+      keys.passwordReset(digest),
+      user ? String(user._id) : "",
+      "EX",
+      TTL.passwordResetSeconds,
+    );
+    if (user) {
+      const origin = (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "");
+      const link = `${origin}/reset-password#token=${encodeURIComponent(token)}`;
+      sendMail({
+        to: user.email,
+        subject: "Reset your CampusCommons password",
+        text: ["Hi,", "", `Use this link to choose a new password. It expires in 30 minutes:`, link, "", "If you didn't ask for this, you can ignore this email."].join("\n"),
+      }).catch((err) => log.error({ err, userId: String(user._id) }, "Couldn't email a password reset link"));
+    }
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    log.warn({ err }, "Password reset store unavailable");
+    throw passwordResetStoreDown();
+  }
+  return { sent: true };
+}
+
+export async function resetPassword(input) {
+  const { token, password } = readPasswordResetInput(input);
+  const digest = createHash("sha256").update(token).digest("hex");
+  let userId;
+  try {
+    const redis = getRedis();
+    userId = await redis.eval(
+      'local value = redis.call("GET", KEYS[1]); if value then redis.call("DEL", KEYS[1]); end; return value',
+      1,
+      keys.passwordReset(digest),
+    );
+  } catch (err) {
+    log.warn({ err }, "Password reset store unavailable");
+    throw passwordResetStoreDown();
+  }
+  if (!userId) throw new ServiceError(400, "INVALID_RESET_TOKEN", "This reset link is invalid or expired. Request a new one.");
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  const user = await User.findByIdAndUpdate(userId, { $set: { passwordHash } }, { new: true }).select("_id").lean();
+  if (!user) throw new ServiceError(400, "INVALID_RESET_TOKEN", "This reset link is invalid or expired. Request a new one.");
+  try {
+    await revokeAllRefreshTokens(userId);
+  } catch (err) {
+    log.error({ err, userId: String(userId) }, "Couldn't revoke refresh sessions after password reset");
+    throw passwordResetStoreDown();
+  }
+  return { reset: true };
 }
 
 const invalidCredentials = () =>

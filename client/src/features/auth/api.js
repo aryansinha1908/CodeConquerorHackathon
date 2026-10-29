@@ -27,6 +27,18 @@ export async function login(data) {
   return res.data;
 }
 
+/** POST /auth/forgot-password → data { sent } */
+export async function requestPasswordReset(data) {
+  const res = await http.post('/auth/forgot-password', data);
+  return res.data;
+}
+
+/** POST /auth/reset-password → data { reset } */
+export async function resetPassword(data) {
+  const res = await http.post('/auth/reset-password', data);
+  return res.data;
+}
+
 /** POST /auth/logout → data { loggedOut } (always 200; the cookie is enough) */
 export async function logout() {
   const res = await http.post('/auth/logout');

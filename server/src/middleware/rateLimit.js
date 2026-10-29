@@ -147,6 +147,26 @@ export const TIERS = {
     message: (wait) =>
       `Too many sign-ups from your network. Try again in ${wait}.`,
   },
+  passwordReset: {
+    windowMs: 15 * MINUTE,
+    limit: 3,
+    key: byEmail,
+    message: (wait) => `Too many password reset requests for this email. Try again in ${wait}.`,
+  },
+  passwordResetIp: {
+    windowMs: 15 * MINUTE,
+    limit: 30,
+    key: byIp,
+    skip: noAddress,
+    message: (wait) => `Too many password reset requests from your network. Try again in ${wait}.`,
+  },
+  passwordResetRedeemIp: {
+    windowMs: 15 * MINUTE,
+    limit: 20,
+    key: byIp,
+    skip: noAddress,
+    message: (wait) => `Too many password reset attempts from your network. Try again in ${wait}.`,
+  },
   otpSend: {
     windowMs: 15 * MINUTE,
     limit: 3,
@@ -286,6 +306,8 @@ export function createLimiter(tierName, overrides = {}) {
 // Stacked: the email (or role) tier first, then the coarse IP ceilings. Express takes the arrays as
 // middleware.
 export const loginLimiter = [createLimiter("login"), createLimiter("loginIp")];
+export const passwordResetLimiter = [createLimiter("passwordReset"), createLimiter("passwordResetIp")];
+export const passwordResetRedeemLimiter = createLimiter("passwordResetRedeemIp");
 export const registerLimiter = [
   createLimiter("register"),
   createLimiter("registerIp"),
