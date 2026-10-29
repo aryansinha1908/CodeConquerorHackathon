@@ -100,6 +100,13 @@ export function checkEnv(env = process.env) {
       warnings.push(
         "MAIL_FROM is not set: mail goes out from a placeholder address that SMTP providers refuse or mark as spam. Use the sender your SMTP account has verified.",
       );
+    // Render sets RENDER=true in every service. Its free instances drop outbound SMTP on these ports,
+    // so every send times out, and the only trace is "Couldn't email an OTP" per sign-up.
+    const smtpPort = Number(env.SMTP_PORT) || 587; // the mailer's default
+    if (env.RENDER === "true" && [25, 465, 587].includes(smtpPort))
+      warnings.push(
+        `SMTP_PORT is ${smtpPort}, which Render's free instances block: every email times out. Brevo also listens on 2525, so set SMTP_PORT=2525.`,
+      );
   }
 
   return production

@@ -99,6 +99,7 @@ Keep the values you collect in a password manager, or in `server/.env.production
 ## 3. Cloudinary
 
 - [ ] Sign in → **Settings** → **API Keys** → **Generate New API Key**. A key used only by this deployment can be revoked without touching anything else.
+  - **The key must be allowed to upload.** A key with restricted permissions passes Cloudinary's read-only checks but refuses every upload with `403 Request forbidden due to missing permissions (actions=["create"])`. The API then answers 503 "Uploads aren't available right now.", and Render's log says `Cloudinary refused the upload (HTTP 403)`. Give the key full (or upload and delete) permissions, or use the account's default key.
 - [ ] Copy the **cloud name** (top of the API Keys page or the dashboard), the **API key** and the **API secret**.
 - [ ] Nothing else to configure. Condition photos are public (`upload` type). ID cards and badge evidence are `authenticated`, and open only through 5-minute signed links from Cloudinary's Download API on `api.cloudinary.com`, which the Vercel CSP allows. If a PDF of badge evidence won't open, check **Settings → Security → "Allow delivery of PDF and ZIP files"**.
 
@@ -382,6 +383,14 @@ While it's on, the login page shows the role buttons, and anyone can sign in as 
 - [ ] Don't share the judged URL with students or invite real users onto it. Registration stays open to `@nitjsr.ac.in` (there's no switch to close it), so a teammate can show the OTP flow with their own address, knowing the demo admin can see that account's activity.
 - [ ] A deployment for real members is a **separate** stack: its own Render service (copy the Blueprint under another name), its own Atlas database, its own Upstash database, new secrets, and `DEMO_MODE=false`. With it off, the demo buttons disappear, `POST /auth/demo-login` answers 404, and the demo accounts can't sign in at all.
 - At start-up the API warns in the log when `DEMO_MODE` is on and accounts outside the demo domain exist: the sign that real people are on a demo instance.
+- **Reviewing a real member needs a real admin.** The demo admin's verification queue shows only demo accounts, so a teammate's ID card never appears there. Make your own (email-verified) account an admin, then reload the site:
+
+  ```
+  cd server
+  npm run grant-admin -- <your email>        # --revoke takes it away again
+  ```
+
+  It changes the database in `MONGODB_URI` (`DOTENV_PATH=.env.production.local` for the deployed one, if your `server/.env` points elsewhere) and is audited as `user.roles_changed`.
 - **Emergency brake:** setting `DEMO_MODE` to `"false"` on the judged instance (in `render.yaml`, then sync) stops every demo sign-in. A demo session already open ends at its next token refresh, within 15 minutes. The golden-path script needs `DEMO_MODE=true`.
 
 ---
@@ -410,7 +419,7 @@ While it's on, the login page shows the role buttons, and anyone can sign in as 
 | `/health` says `"redis":"degraded"`                                                                          | `REDIS_URL` is the REST URL, or `redis://` instead of `rediss://`                                                                                                                                                                                   |
 | Bookings answer 503; sign-in says "briefly unavailable"                                                      | Redis is down or out of its command quota                                                                                                                                                                                                           |
 | Uploads answer 503 "Uploads aren't configured."                                                              | A `CLOUDINARY_*` variable is missing                                                                                                                                                                                                                |
-| No OTP email                                                                                                 | [§9](#9-smoke-test), email. On the free plan, `SMTP_PORT` must be 2525 with Brevo                                                                                                                                                                   |
+| No OTP email                                                                                                 | [§9](#9-smoke-test), email. On the free plan, `SMTP_PORT` must be 2525 with Brevo: the boot log then has no `SMTP_PORT is 587, which Render's free instances block` warning. Each failed send logs `Couldn't email an OTP` with the SMTP error within about 15 seconds. Also check the sender is verified in Brevo, and the recipient's spam folder |
 | Signed in, but a reload signs you out                                                                        | Look at `POST /api/v1/auth/refresh` in DevTools → Network. No `refreshToken` cookie sent: the login's `Set-Cookie` didn't come back through the rewrite. 401: the session ended (new token secrets, or Redis lost it). 503: Redis is down           |
 | `/api/...` on Vercel returns HTML or a DNS error                                                             | The rewrite still points at the placeholder or the wrong host ([§6](#6-vercel-the-client))                                                                                                                                                          |
 | The first request after a quiet spell is slow or fails                                                       | Render's free instance waking up ([§10](#10-keep-it-awake-during-judging))                                                                                                                                                                          |

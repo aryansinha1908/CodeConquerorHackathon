@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node scripts/seed.js",
+    "grant-admin": "node scripts/grant-admin.js",
     "golden-path": "node scripts/golden-path.mjs",
     "check:redis": "node --env-file=.env scripts/check-redis.cjs"
   },

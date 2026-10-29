@@ -74,6 +74,7 @@ Open <http://localhost:5173>. The Vite dev server proxies `/api` to `http://loca
 | `npm test` | Every test (`node --test`). The integration suites skip themselves without `TEST_MONGODB_URI` |
 | `TEST_MONGODB_URI=mongodb://127.0.0.1:27017 node --test` | The integration suites too, against a real MongoDB. Each test file creates its own `campuscommons_test_<random>` database and drops it; Redis is `ioredis-mock`. Use a local or throwaway server, never production |
 | `npm run seed` | The demo data: 18 NIT JSR org units, the badge catalogue, 13 resources, 6 demo users and 16 demo bookings in every status. Idempotent, and it resets the judge script. The bookings need Redis |
+| `npm run grant-admin -- <email> [--revoke]` | Makes an existing, email-verified real account an admin, or takes the role away; audited as `user.roles_changed`. Demo staff only ever see demo accounts, so reviewing a real member's ID card needs a real admin. Uses the database in `MONGODB_URI`; the person picks the role up on their next page load |
 | `npm run golden-path -- [url] [--no-photos]` | Walks judge-script steps 1–12 over HTTP as the demo users and cleans up after itself. Needs `DEMO_MODE=true` and a fresh seed. Without a URL it uses `GOLDEN_PATH_URL`, then `http://localhost:$PORT`. **Run `npm run seed` afterwards:** the run leaves the demo student holding 3D Printing Basics |
 
 **Client** (`cd client`):

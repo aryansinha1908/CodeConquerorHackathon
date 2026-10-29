@@ -68,6 +68,16 @@ function uploadError(err, field) {
     return invalid(message, [{ path: field, message }]);
   }
   if (err instanceof ServiceError) return err;
+  // 401/403: Cloudinary refuses this key (wrong secret, or a key without upload rights, which answers
+  // "missing permissions (actions=["create"])"). Retrying never helps, and the SDK's message is only
+  // "unexpected status code", so say what to check.
+  if (status === 401 || status === 403) {
+    log.error(
+      { err },
+      `Cloudinary refused the upload (HTTP ${status}): check that CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET belong together and that the key may upload (Cloudinary → Settings → API Keys)`,
+    );
+    return new ServiceError(503, "SERVICE_UNAVAILABLE", "Uploads aren't available right now.");
+  }
   log.warn({ err }, "Upload to Cloudinary failed");
   return new ServiceError(
     503,
