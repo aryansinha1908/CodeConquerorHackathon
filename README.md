@@ -130,6 +130,7 @@ The seed also leaves a no-show, an overdue booking still in use, a rejected requ
 | [`docs/backend.md`](docs/backend.md) | Server features, folder layout, validation, seed data |
 | [`docs/frontend.md`](docs/frontend.md) | Pages, components, data fetching, accessibility, the judge script |
 | [`docs/api.md`](docs/api.md) | The API reference, as built |
+| [`docs/demo.md`](docs/demo.md) | How to demo and test every built feature by hand: setup, demo accounts, seeded data, the judge script, a tour by area, what isn't built |
 | [`docs/deploy.md`](docs/deploy.md) | The deployment checklist: Atlas, Upstash, Cloudinary, SMTP, Render, Vercel, seeding, smoke test, secrets, rollback |
 | [`docs/progress.md`](docs/progress.md) | The running log: what's built, what was decided, what's left |
 

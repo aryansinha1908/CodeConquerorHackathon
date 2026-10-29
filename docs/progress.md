@@ -2,7 +2,11 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11) are committed locally on `Aryan` and not pushed. The judge script passes end to end (`npm run golden-path`).
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11) are committed locally on `Aryan` as `d839a57` … `3f68dd2` and **not pushed** (`origin/Aryan` is still at `4533665`). The judge script passes end to end (`npm run golden-path`).
+
+**Uncommitted in the working tree:** `docs/deploy.md` (table re-alignment only, probably an editor's Prettier), `server/scripts/check-redis.cjs` and the `check:redis` script in `server/package.json` (see "Local setup" below); `docs/demo.md` (the manual demo and testing guide, linked from the README).
+
+**Resume here:** §11's "Open" list, after fixing the local setup below.
 
 **Team change:** the auth teammate has stopped; the frontend teammate is doing `/badges` and one more page (to be confirmed). Everything else is integration work on `Aryan`.
 
@@ -255,6 +259,21 @@ The high-severity fixes:
 - **Incident strikes aren't transactional either:** a failed strike increment after the incident is resolved leaves the strike uncounted, and a retry only answers 409.
 - **Incident photos** come from the upload service (not built), like badge evidence.
 - **No badge revoke action yet.** The `revoked` status is supported everywhere it's read, but nothing sets it. It isn't in the route table either.
+
+---
+
+## 7b. Local setup status (29 Oct 2026)
+
+The first `npm run dev` against your own `server/.env` showed three problems:
+1. **`MongoDB connected db: "test"`:** `MONGODB_URI` has no database name in its path. Add `/campuscommons` before the `?`, or the seed and all data land in `test`.
+2. **`ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET are the same`:** generate two different values, plus `OTP_PEPPER`, with `node -e 'for (let i = 0; i < 3; i++) console.log(require("crypto").randomBytes(48).toString("base64url"))'`. Never reuse values from old commits.
+3. **Redis `connect ETIMEDOUT`** against a Redis Cloud (redis.io) database. **Diagnosed: the network, not the config.** DNS resolves, but TCP to port 15363 times out. `portquiz.net` (which listens on every port) also times out on 15363, 15000 and 6379, while 80 and 443 connect. So this Wi-Fi blocks every outgoing port except web ports. For development, use a local Redis (`sudo docker run -d --name redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:7`, bound to localhost because it has no password, then `REDIS_URL=redis://127.0.0.1:6379`) or a phone hotspot. Keep Redis Cloud for Render. Whether its URL needs `redis://` or `rediss://` is still unknown: run `npm run check:redis` once from a hotspot. To re-check, run `cd server && npm run check:redis`. It prints the scheme, port and host suffix (never the password), then tests DNS, TCP and TLS separately and says what to change:
+   - **TCP timeout:** the network blocks the port, or the port is wrong. Redis Cloud's port is the database's own 5-digit one. Campus Wi-Fi often blocks it; try a hotspot. If that's the cause, use a local Redis for development and keep Redis Cloud for Render.
+   - **TLS result:** it tells you whether the URL should be `redis://` or `rediss://`.
+
+**Redis Cloud instead of Upstash** works with no code change. The server uses Lua scripts and `SCAN`, which Redis Cloud's `default` user can run. The URL is `redis://default:<password>@<host>:<port>` (`rediss://` if TLS is on). Put the database near Render (AWS `ap-southeast-1` or `ap-south-1`). `docs/deploy.md` §2 and a comment in `render.yaml` still describe Upstash.
+
+**Environment variables:** the server's are all in `server/.env.example`, with comments; `render.yaml` lists them for Render. In production, the server refuses to boot without `MONGODB_URI`, `REDIS_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `OTP_PEPPER` and `CLIENT_URL`, and each of the three secrets must be at least 32 characters. On Render, set `TRUST_PROXY_HOPS=2`, and use Brevo SMTP on port 2525 (the free plan blocks 25, 465 and 587). **The client has no environment variables:** the only setting is the `/api` rewrite destination in `client/vercel.json`, which you replace with the Render URL.
 
 ---
 
