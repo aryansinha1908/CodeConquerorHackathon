@@ -20,6 +20,8 @@ import {
   markPasswordMatched,
   otpSendLimiter,
   otpVerifyLimiter,
+  passwordResetLimiter,
+  passwordResetRedeemLimiter,
   refreshLimiter,
   registerLimiter,
 } from "../middleware/rateLimit.js";
@@ -36,10 +38,14 @@ import {
   readEmailInput,
   readLoginInput,
   readOtpInput,
+  readPasswordResetInput,
+  readPasswordResetRequestInput,
   readRegisterInput,
   refreshSession,
   register,
   resendOtp,
+  requestPasswordReset,
+  resetPassword,
   verifyOtp,
 } from "../services/authService.js";
 import {
@@ -120,6 +126,24 @@ router.post(
   otpSendLimiter,
   async (req, res) => {
     sendData(req, res, await resendOtp(req.body));
+  },
+);
+
+router.post(
+  "/forgot-password",
+  checked(readPasswordResetRequestInput),
+  passwordResetLimiter,
+  async (req, res) => {
+    sendData(req, res, await requestPasswordReset(req.body));
+  },
+);
+
+router.post(
+  "/reset-password",
+  checked(readPasswordResetInput),
+  passwordResetRedeemLimiter,
+  async (req, res) => {
+    sendData(req, res, await resetPassword(req.body));
   },
 );
 
