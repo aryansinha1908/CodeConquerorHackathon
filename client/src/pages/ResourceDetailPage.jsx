@@ -335,25 +335,29 @@ function BookingArea({ resource }) {
 
   return (
     <div id="booking" className="space-y-6 scroll-mt-24">
-      <AvailabilityGrid
-        model={model}
-        selection={pick.selection}
-        anchor={pick.anchor}
-        onPick={(cell) => setPick((current) => pickCell({ ...current, cell, mode }))}
-        loading={availability.isPending}
-        error={loadError}
-        onRetry={() => availability.refetch()}
-        retrying={availability.isFetching}
-      />
-      <BookingPanel
-        resource={resource}
-        model={model}
-        modelLoading={availability.isPending}
-        modelError={loadError}
-        selection={pick.selection}
-        onSelectionChange={(selection) => setPick({ selection, anchor: null })}
-        onBooked={() => setPick({ selection: null, anchor: null })}
-      />
+      <div data-tour="resource-availability">
+        <AvailabilityGrid
+          model={model}
+          selection={pick.selection}
+          anchor={pick.anchor}
+          onPick={(cell) => setPick((current) => pickCell({ ...current, cell, mode }))}
+          loading={availability.isPending}
+          error={loadError}
+          onRetry={() => availability.refetch()}
+          retrying={availability.isFetching}
+        />
+      </div>
+      <div data-tour="resource-panel">
+        <BookingPanel
+          resource={resource}
+          model={model}
+          modelLoading={availability.isPending}
+          modelError={loadError}
+          selection={pick.selection}
+          onSelectionChange={(selection) => setPick({ selection, anchor: null })}
+          onBooked={() => setPick({ selection: null, anchor: null })}
+        />
+      </div>
     </div>
   );
 }
@@ -394,7 +398,7 @@ export function ResourceDetail({ resource }) {
         </p>
       </nav>
 
-      <FadeUp>
+      <FadeUp data-tour="resource-header">
         <Header resource={resource} />
       </FadeUp>
 
@@ -403,6 +407,7 @@ export function ResourceDetail({ resource }) {
         <StaggerList
           as="div"
           ref={rulesRef}
+          data-tour="resource-rules"
           step={0.06}
           style={{ top: STICKY_TOP }}
           className="lg:col-span-5 space-y-6 lg:sticky"
@@ -445,7 +450,7 @@ export function ResourceDetail({ resource }) {
         </StaggerList>
 
         <StaggerList as="div" step={0.08} delay={0.05} className="lg:col-span-7 space-y-6">
-          <StaggerItem as="div">
+          <StaggerItem as="div" data-tour="resource-eligibility">
             <EligibilityCard resource={resource} />
           </StaggerItem>
           <StaggerItem as="div">

@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, MenuButton, MenuItem, MenuItems, MenuSection, MenuSeparator } from '@headlessui/react';
 import { motion } from 'framer-motion';
-import { IdCard, LogOut, Shield, UserRound } from 'lucide-react';
+import { BookOpen, IdCard, LogOut, Shield, UserRound } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 import { useLogout } from '../features/auth/useLogout';
 import { accountView } from '../features/profile/account';
@@ -50,6 +50,12 @@ export function AccountPanel({ view, onLogout }) {
             <Badge variant={view.verification.badge.variant} size="sm">
               {view.verification.badge.label}
             </Badge>
+          </Link>
+        </MenuItem>
+        <MenuItem>
+          <Link to="/how-it-works" className={itemClass}>
+            <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
+            How it works
           </Link>
         </MenuItem>
         {view.isAdmin && (

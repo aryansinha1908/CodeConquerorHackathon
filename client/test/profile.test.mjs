@@ -311,7 +311,8 @@ async function renderAccountPanel(who) {
 test('AccountPanel: Profile, ID verification with its status, Log out; the Admin console for admins only', async () => {
   const member = await renderAccountPanel(user({ verification: { status: 'pending', reason: null } }));
   assertNoJunk(member);
-  assert.equal(member.match(/role="menuitem"/g)?.length, 3);
+  // Profile, ID verification, How it works, Log out.
+  assert.equal(member.match(/role="menuitem"/g)?.length, 4);
   assert.match(member, /<a[^>]*href="\/profile"[^>]*>[\s\S]*?Profile<\/a>/);
   assert.match(member, /<a[^>]*href="\/verification"[^>]*>[\s\S]*?ID verification[\s\S]*?Pending review[\s\S]*?<\/a>/);
   assert.match(member, /<button[^>]*>[\s\S]*?Log out<\/button>/);
@@ -320,7 +321,7 @@ test('AccountPanel: Profile, ID verification with its status, Log out; the Admin
   assert.match(member, /<div aria-hidden="true"[^>]*>[\s\S]*?Ananya Rao/);
 
   const admin = await renderAccountPanel(ADMIN);
-  assert.equal(admin.match(/role="menuitem"/g)?.length, 4);
+  assert.equal(admin.match(/role="menuitem"/g)?.length, 5);
   assert.match(admin, /<a[^>]*href="\/admin"[^>]*>[\s\S]*?Admin console<\/a>/);
 
   const manager = await renderAccountPanel(MANAGER);

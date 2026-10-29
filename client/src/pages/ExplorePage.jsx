@@ -180,6 +180,7 @@ export default function ExplorePage() {
                 next loads), so the next page's cards come in one after another once they arrive. */}
             <StaggerList
               key={meta?.page ?? filters.page}
+              data-tour="explore-results"
               aria-busy={list.isFetching || undefined}
               className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}
             >

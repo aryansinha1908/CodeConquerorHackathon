@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { enter, fadeUp } from '../../lib/motion';
 
@@ -133,6 +134,11 @@ export function AuthLayout({ title, subtitle, children }) {
           {/* Bottom note */}
           <p className="text-center text-xs text-[#1a1a1a]/50 mt-4 font-mono">
             Only <span className="font-bold">@nitjsr.ac.in</span> emails are accepted
+          </p>
+          <p className="text-center text-xs mt-2 font-mono">
+            <Link to="/how-it-works" className="font-bold text-[#183d2d] underline hover:text-[#a93226] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] rounded-sm">
+              How allocation works
+            </Link>
           </p>
         </div>
       </main>

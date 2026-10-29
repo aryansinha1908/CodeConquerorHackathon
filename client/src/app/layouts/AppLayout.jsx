@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import {
   AlertCircle,
   Award,
+  BookOpen,
   Bell,
   CalendarCheck,
   Compass,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
 import { NotificationBell, UserMenu } from '../../components/LazyPages';
+import { TourButton } from '../../features/tour/TourButton';
 import { AccountButtonFace, Avatar, accountButtonClass } from '../../components/AccountFace';
 import { useLogout } from '../../features/auth/useLogout';
 import { accountView } from '../../features/profile/account';
@@ -204,13 +206,20 @@ export function AppLayout() {
           {/* User actions */}
           <div className="flex items-center gap-2">
             {/* frontend.md §7: the unread count and the latest 5, on every page of the app shell. */}
-            <Suspense fallback={<BellFallback />}>
-              <NotificationBell />
-            </Suspense>
+            {/* The guided tour of this page (features/tour). */}
+            <TourButton />
 
-            <Suspense fallback={<UserMenuFallback />}>
-              <UserMenu />
-            </Suspense>
+            <div data-tour="header-bell">
+              <Suspense fallback={<BellFallback />}>
+                <NotificationBell />
+              </Suspense>
+            </div>
+
+            <div data-tour="header-account">
+              <Suspense fallback={<UserMenuFallback />}>
+                <UserMenu />
+              </Suspense>
+            </div>
 
             {/* Mobile menu toggle */}
             <button
@@ -262,6 +271,10 @@ export function AppLayout() {
                   <Link to="/verification" onClick={closeMenu} className={accountLinkClass}>
                     <IdCard className="w-4 h-4" aria-hidden="true" />
                     ID verification
+                  </Link>
+                  <Link to="/how-it-works" onClick={closeMenu} className={accountLinkClass}>
+                    <BookOpen className="w-4 h-4" aria-hidden="true" />
+                    How it works
                   </Link>
                   {view.isAdmin && (
                     <Link to="/admin" onClick={closeMenu} className={accountLinkClass}>
@@ -320,6 +333,10 @@ export function AppLayout() {
             </span>
           </div>
           <div className="text-white/60 text-center md:text-right">
+            <Link to="/how-it-works" className="font-bold text-white underline hover:text-[#f1c40f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white rounded-sm">
+              HOW IT WORKS
+            </Link>
+            <span className="mx-2 text-white/30">|</span>
             <span>UNITS: DIC · CENTRAL WORKSHOP · CSE LABS · MECH LABS</span>
             <span className="mx-2 text-white/30">|</span>
             <span className="text-[#f1c40f]">IST TIME ENGINE</span>

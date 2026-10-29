@@ -98,7 +98,7 @@ export function QueueItem({ item, units, isSelf, onView, onDecide }) {
         </dl>
 
         <div className="mt-4 pt-3 border-t-2 border-[#1a1a1a]/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2" data-tour="verification-view">
             <Button
               variant="outline"
               size="sm"
@@ -120,7 +120,7 @@ export function QueueItem({ item, units, isSelf, onView, onDecide }) {
           </div>
           {item.status === 'pending' &&
             (canDecide ? (
-              <div className="flex gap-2">
+              <div className="flex gap-2" data-tour="verification-decide">
                 <Button
                   variant="forest"
                   size="sm"

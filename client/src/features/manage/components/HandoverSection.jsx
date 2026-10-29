@@ -40,7 +40,7 @@ export function HandoverSection({
   if (settled && page > pages) setPage(pages);
 
   return (
-    <section aria-labelledby={headingId} className="space-y-3">
+    <section aria-labelledby={headingId} data-tour={`handovers-${sectionId}`} className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
         <div className="min-w-0">
           <h3 id={headingId} className="text-lg font-black tracking-tight flex items-center gap-2">

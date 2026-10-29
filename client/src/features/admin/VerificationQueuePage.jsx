@@ -264,7 +264,7 @@ export default function VerificationQueuePage() {
             </span>
             {list.isFetching && <span aria-hidden="true">Updating…</span>}
           </div>
-          <StaggerList className={`space-y-4 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
+          <StaggerList data-tour="verifications-queue" className={`space-y-4 transition-opacity ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
             {items.map((item) => (
               <QueueItem
                 key={item.user._id}

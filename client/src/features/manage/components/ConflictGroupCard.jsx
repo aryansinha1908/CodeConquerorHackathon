@@ -95,7 +95,7 @@ export function RequestRow({ booking, position, oldestPending, user, onDecide })
             </span>
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1" data-tour="request-actions">
             <Button
               type="button"
               variant="forest"

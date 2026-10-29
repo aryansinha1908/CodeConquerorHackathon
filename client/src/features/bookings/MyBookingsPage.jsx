@@ -127,6 +127,7 @@ export default function MyBookingsPage() {
 
       <div
         role="tablist"
+        data-tour="bookings-tabs"
         aria-label="Booking lists"
         onKeyDown={onTabKeyDown}
         className="flex gap-2 overflow-x-auto pb-1"
@@ -204,7 +205,7 @@ export default function MyBookingsPage() {
                 retrying={list.isFetching}
               />
             )}
-            <StaggerList className={cn('space-y-4 transition-opacity', list.isPlaceholderData && 'opacity-60')}>
+            <StaggerList data-tour="bookings-list" className={cn('space-y-4 transition-opacity', list.isPlaceholderData && 'opacity-60')}>
               {items.map((booking) => (
                 <BookingCard key={booking._id} booking={booking} now={now} />
               ))}

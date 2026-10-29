@@ -20,7 +20,7 @@ export function ManageLayout() {
           </span>
           <h1 className="text-xl font-black text-[#1a1a1a] tracking-tight">Management Console</h1>
         </div>
-        <nav aria-label="Management" className="flex flex-wrap gap-2">
+        <nav aria-label="Management" data-tour="manage-tabs" className="flex flex-wrap gap-2">
           {/* end: active on /manage itself, not on every page under it. */}
           <NavLink to="/manage" end className={subnavClass}>
             <LayoutDashboard className="w-3.5 h-3.5" aria-hidden="true" />

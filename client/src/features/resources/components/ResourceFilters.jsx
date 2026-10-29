@@ -121,6 +121,7 @@ export function ResourceFilters({
       <div className="flex flex-col md:flex-row gap-3 md:items-end">
         <form
           role="search"
+          data-tour="explore-search"
           className="flex-1 flex flex-col gap-1"
           onSubmit={(event) => {
             event.preventDefault();
@@ -196,7 +197,7 @@ export function ResourceFilters({
       </div>
 
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-[#1a1a1a]/15">
-        <div role="group" aria-label="Category" className="flex flex-wrap items-center gap-1.5">
+        <div role="group" aria-label="Category" data-tour="explore-categories" className="flex flex-wrap items-center gap-1.5">
           <CategoryPill active={!filters.category} onClick={() => onChange({ category: '' })} layoutId={pillId}>
             All categories
           </CategoryPill>
@@ -216,7 +217,7 @@ export function ResourceFilters({
         </div>
 
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-3 shrink-0">
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2" data-tour="explore-eligible">
             <input
               id={eligibleId}
               type="checkbox"

@@ -25,6 +25,7 @@ import {
   HandoverPage,
   HandoversPage,
   HomePage,
+  HowItWorksPage,
   IncidentDetailPage,
   IncidentListPage,
   LazyPage,
@@ -74,6 +75,11 @@ export const router = createBrowserRouter([
         <VerifyOtpPage />
       </ErrorBoundary>
     ),
+  },
+  // Public, like the auth pages: how allocation works (FC-01), readable before signing in.
+  {
+    path: '/how-it-works',
+    element: <ErrorBoundary>{page(<HowItWorksPage />)}</ErrorBoundary>,
   },
 
   // ── Authenticated App Shell ─────────────────────────────────────────────────

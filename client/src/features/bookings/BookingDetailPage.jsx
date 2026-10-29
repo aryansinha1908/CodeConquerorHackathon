@@ -285,14 +285,16 @@ export default function BookingDetailPage() {
 
           {booking.isOverdue && <OverdueBanner booking={booking} now={now} />}
 
-          <ActionBar booking={booking} user={user} now={now} onCancel={openCancel} />
+          <div data-tour="booking-actions">
+            <ActionBar booking={booking} user={user} now={now} onCancel={openCancel} />
+          </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          <div data-tour="booking-status" className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
             <DetailsCard booking={booking} user={user} />
             <StatusCard booking={booking} user={user} />
           </div>
 
-          <section aria-labelledby="booking-reports-heading" className="space-y-4">
+          <section aria-labelledby="booking-reports-heading" data-tour="booking-reports" className="space-y-4">
             <h2 id="booking-reports-heading" className={`${sectionHeadingClass} flex items-center gap-2`}>
               <ClipboardList className="w-5 h-5" aria-hidden="true" />
               Condition reports
@@ -312,7 +314,7 @@ export default function BookingDetailPage() {
             )}
           </section>
 
-          <section aria-labelledby="booking-history-heading" className="space-y-4">
+          <section aria-labelledby="booking-history-heading" data-tour="booking-history" className="space-y-4">
             <h2 id="booking-history-heading" className={`${sectionHeadingClass} flex items-center gap-2`}>
               <History className="w-5 h-5" aria-hidden="true" />
               History

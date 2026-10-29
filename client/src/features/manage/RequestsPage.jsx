@@ -245,7 +245,7 @@ export default function RequestsPage() {
       )}
 
       {groups.length > 0 && (
-        <StaggerList step={0.07} className={`space-y-5 transition-opacity ${queue.isPlaceholderData ? 'opacity-60' : ''}`}>
+        <StaggerList step={0.07} data-tour="requests-groups" className={`space-y-5 transition-opacity ${queue.isPlaceholderData ? 'opacity-60' : ''}`}>
           {groups.map((group, index) => (
             <ConflictGroupCard
               key={groupKey(group, index)}

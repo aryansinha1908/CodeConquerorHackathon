@@ -243,7 +243,7 @@ function ReturnConfirm({ bookingId }) {
 
       {!showForm && <NoFormReason booking={booking} user={user} />}
 
-      <section aria-labelledby="return-compare-heading" className="space-y-3">
+      <section aria-labelledby="return-compare-heading" data-tour="return-compare" className="space-y-3">
         <h3 id="return-compare-heading" className="text-lg font-black tracking-tight">
           Check-in and check-out, side by side
         </h3>
@@ -270,6 +270,7 @@ function ReturnConfirm({ bookingId }) {
       {showForm && (
         <section
           aria-labelledby="return-check-heading"
+          data-tour="return-form"
           className="rounded-xl border-2 border-[#1a1a1a] bg-white p-4 sm:p-6 shadow-[4px_4px_0_#1a1a1a] space-y-4"
         >
           <div>

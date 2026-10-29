@@ -33,6 +33,7 @@ export const IncidentDetailPage = lazy(() => import('../features/incidents/Incid
 export const IncidentListPage = lazy(() => import('../features/incidents/IncidentListPage'));
 export const AuditPage = lazy(() => import('../features/admin/AuditPage'));
 export const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
+export const HowItWorksPage = lazy(() => import('../pages/HowItWorksPage'));
 export const ProfilePage = lazy(() => import('../features/profile/ProfilePage'));
 // /badges is the teammate's: their page replaces this line's import when it lands.
 export const BadgesPage = lazy(() =>

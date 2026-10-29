@@ -98,7 +98,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <StaggerList step={0.06} aria-label="What needs you" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <StaggerList step={0.06} data-tour="dashboard-counts" aria-label="What needs you" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {cards.map((card) => (
           <CountCard key={card.id} {...card} />
         ))}
