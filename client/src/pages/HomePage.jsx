@@ -1,517 +1,110 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  ArrowRight,
-  Award,
-  Building2,
-  CalendarCheck,
-  CheckCircle2,
-  Clock,
-  Compass,
-  Cpu,
-  FileCheck,
-  Flame,
-  Layers,
-  MapPin,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  Wrench,
-  X,
-  Zap,
-} from 'lucide-react';
-import { FadeUp, StaggerItem, StaggerList } from '../components/Motion';
-import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
-import { Card } from '../components/ui/Card';
-import { useAuthStore } from '../stores/auth';
-import { useResources } from '../features/resources/api';
-import { ResourceCard } from '../features/resources/components/ResourceCard';
-import { CATEGORY_OPTIONS } from '../features/resources/format';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowDown, ArrowRight, ArrowUpRight, Building2, CalendarDays, Check, Compass, Cpu, FlaskConical, Hammer, Layers3, ShieldCheck, Sparkles, Users } from 'lucide-react';
 
-// Quick search suggestions that take the user directly into Explore with a query or category
-const QUICK_SEARCH_TAGS = [
-  { label: '3D Printers', q: '3D Printer' },
-  { label: 'CNC Mills', q: 'CNC' },
-  { label: 'Oscilloscopes', q: 'Oscilloscope' },
-  { label: 'Laser Cutters', q: 'Laser' },
-  { label: 'Compute Clusters', category: 'computing' },
-  { label: 'Robotics Bench', q: 'Robotics' },
+const categories = [
+  { icon: Cpu, label: 'Computing', detail: 'Workstations, boards & more', color: 'mint' },
+  { icon: FlaskConical, label: 'Lab equipment', detail: 'Tools for your next experiment', color: 'yellow' },
+  { icon: Hammer, label: 'Workshop', detail: 'Make something real', color: 'pink' },
+  { icon: Building2, label: 'Spaces', detail: 'Rooms to think and work', color: 'blue' },
 ];
 
-const WORKFLOW_STEPS = [
-  {
-    step: '01',
-    title: 'Search & Pre-Verify',
-    desc: 'Instant auto-check against your department roll, student tier, and safety certifications with zero waiting.',
-    icon: Search,
-  },
-  {
-    step: '02',
-    title: 'Pick Exact IST Slots',
-    desc: 'Conflict-free 7-day calendar matrix with real-time slot concurrency locks and waitlist positioning.',
-    icon: Clock,
-  },
-  {
-    step: '03',
-    title: 'Instant or 1-Click Approval',
-    desc: 'Autonomous booking confirmation for standard lab benches; transparent manager queue for heavy machinery.',
-    icon: Zap,
-  },
-  {
-    step: '04',
-    title: 'Photo-Proof Handover',
-    desc: 'Mobile-friendly inspection checklist with camera verification at check-in and check-out to eliminate disputes.',
-    icon: FileCheck,
-  },
-];
-
-const CAMPUS_FACILITIES = [
-  {
-    code: 'DIC',
-    name: 'Design Innovation Centre',
-    focus: 'Rapid prototyping, stereolithography & multi-material 3D printing, laser cutters, CAD/CAM.',
-    badge: 'Open Access',
-  },
-  {
-    code: 'CWS',
-    name: 'Central Workshop',
-    focus: 'Heavy conventional & CNC lathes, 5-axis milling, precision grinding, foundry & sheet metal.',
-    badge: 'Safety Badge Required',
-  },
-  {
-    code: 'CSE',
-    name: 'High-Performance Computing Lab',
-    focus: 'NVIDIA GPU clusters, neural network training nodes, simulation & parallel computing benches.',
-    badge: 'Tier Verified',
-  },
-  {
-    code: 'ECE',
-    name: 'Advanced Electronics & Signal Lab',
-    focus: 'GHz spectrum analyzers, high-bandwidth DSOs, RF signal generators, SMD rework stations.',
-    badge: 'Slot Managed',
-  },
+const steps = [
+  { n: '01', title: 'Find what you need', text: 'Browse equipment and spaces shared by departments across campus.' },
+  { n: '02', title: 'Check your access', text: 'See availability and any training or eligibility requirements up front.' },
+  { n: '03', title: 'Make it happen', text: 'Request a time, pick it up, and return it when you’re done.' },
 ];
 
 export default function HomePage() {
-  const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('');
-
-  // Fetch featured resources (top 6 resources on campus)
-  const resourcesQuery = useResources({
-    category: activeCategory || undefined,
-    limit: 6,
-  });
-
-  const featuredItems = Array.isArray(resourcesQuery.data?.data)
-    ? resourcesQuery.data.data
-    : [];
-
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    const query = searchQuery.trim();
-    if (query) {
-      navigate(`/explore?q=${encodeURIComponent(query)}`);
-    } else {
-      navigate('/explore');
-    }
-  };
-
-  const handleQuickTagClick = (tag) => {
-    if (tag.category) {
-      navigate(`/explore?category=${encodeURIComponent(tag.category)}`);
-    } else if (tag.q) {
-      navigate(`/explore?q=${encodeURIComponent(tag.q)}`);
-    }
-  };
-
-  const isVerified = user?.verification?.status === 'approved';
-
   return (
-    <div className="space-y-12 font-mono text-[#1a1a1a] pb-8">
-      {/* ── 1. HERO SECTION ─────────────────────────────────────────────────── */}
-      <FadeUp as="section" className="relative rounded-2xl border-2 border-[#1a1a1a] bg-[#183d2d] text-white p-6 sm:p-10 shadow-[6px_6px_0_#1a1a1a] overflow-hidden">
-        {/* Subtle decorative geometric grid corner accent */}
-        <div aria-hidden="true" className="absolute -top-12 -right-12 w-48 h-48 pointer-events-none select-none opacity-20">
-          <div className="absolute top-4 right-4 w-10 h-10 bg-[#c0392b]" />
-          <div className="absolute top-4 right-16 w-10 h-10 bg-white" />
-          <div className="absolute top-16 right-4 w-10 h-10 bg-[#f1c40f]" />
-          <div className="absolute top-16 right-16 w-10 h-10 bg-[#1abc9c]" />
+    <main className="home-page">
+      <header className="home-nav">
+        <Link to="/" className="home-brand" aria-label="CampusCommons home">
+          <span className="home-brand-mark">CC</span>
+          <span>Campus<span className="home-brand-light">Commons</span></span>
+        </Link>
+        <nav className="home-nav-links" aria-label="Main navigation">
+          <a href="#how-it-works">How it works</a>
+          <a href="#what-you-can-find">Explore resources</a>
+        </nav>
+        <div className="home-nav-actions">
+          <Link to="/login" className="home-login">Log in</Link>
+          <Link to="/register" className="home-button home-button-dark">Join your campus <ArrowUpRight size={16} /></Link>
         </div>
+      </header>
 
-        <div className="relative z-10 max-w-3xl space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-1 rounded-md border border-white/30 bg-[#c0392b] text-[10px] sm:text-xs font-black tracking-widest uppercase text-white shadow-[2px_2px_0_#1a1a1a]">
-              NIT Jamshedpur Central Facility Hub
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-white/20 bg-white/10 text-[10px] font-bold text-white/90">
-              <span className="w-2 h-2 rounded-full bg-[#1abc9c] animate-pulse" />
-              Live IST Engine
-            </span>
+      <section className="home-hero">
+        <div className="home-hero-copy">
+          <div className="home-eyebrow"><span className="home-eyebrow-dot" /> MADE FOR THE MAKERS, THINKERS & DOERS</div>
+          <h1>Your campus has<br />more to <span>offer.</span></h1>
+          <p className="home-hero-text">A 3D printer for your prototype. A lab for your big question. A room for your team to figure it out. Find it, book it, make it yours.</p>
+          <div className="home-hero-actions">
+            <Link to="/register" className="home-button home-button-red">Get started <ArrowRight size={17} /></Link>
+            <Link to="/login" className="home-quiet-link">I already have an account <ArrowUpRight size={15} /></Link>
           </div>
+          <div className="home-trust"><span className="home-trust-icon"><ShieldCheck size={17} /></span><span>For your campus community</span><span className="home-trust-sep">·</span><span>Every booking, accounted for</span></div>
+        </div>
 
-          <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight leading-tight text-white">
-            Shared Lab Facilities, Equipment &amp; High-End Machinery.
-          </h1>
-
-          <p className="text-xs sm:text-sm md:text-base text-white/85 leading-relaxed">
-            Reserve CNC machinery, 3D printers, precision lab instruments, GPU clusters, and specialized workshops across NIT Jamshedpur with zero delays, automatic prerequisites verification, and real-time collision prevention.
-          </p>
-
-          {/* ── Blazing Fast Search Box ── */}
-          <form onSubmit={handleSearchSubmit} role="search" className="pt-2">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <Search
-                  className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1a1a1a]/60 pointer-events-none"
-                  aria-hidden="true"
-                />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Instant search: '3D Printer', 'Oscilloscope', 'DIC Lathe'..."
-                  className="w-full pl-10 pr-10 py-3 text-sm rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] font-mono placeholder:text-[#1a1a1a]/50 focus:outline-none focus:ring-2 focus:ring-[#f1c40f] shadow-[3px_3px_0_#1a1a1a] [&::-webkit-search-cancel-button]:hidden"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    aria-label="Clear search input"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#1a1a1a]/60 hover:text-[#1a1a1a]"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-              <Button
-                type="submit"
-                variant="primary"
-                size="md"
-                className="shrink-0 min-h-[46px] px-6 text-sm"
-              >
-                Find &amp; Book
-                <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
+        <div className="home-hero-art" aria-label="Illustration of shared campus equipment">
+          <div className="home-art-sticker sticker-note"><Sparkles size={16} /> BIG IDEAS<br />START HERE</div>
+          <div className="home-art-sun" />
+          <div className="home-art-grid" />
+          <div className="home-art-card">
+            <div className="home-art-card-top"><span className="home-art-live"><i /> AVAILABLE TODAY</span><span className="home-art-dots">•••</span></div>
+            <div className="home-printer">
+              <div className="printer-spool"><span /></div><div className="printer-frame"><i className="printer-leg left"/><i className="printer-leg right"/><i className="printer-bar"/><i className="printer-head"/><i className="printer-bed"/><i className="printer-object"/></div>
             </div>
-          </form>
-
-          {/* ── Fast Search Pills (Zero Latency Shortcut) ── */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
-            <span className="text-white/70 text-[11px] font-bold">Quick queries:</span>
-            {QUICK_SEARCH_TAGS.map((tag) => (
-              <button
-                key={tag.label}
-                type="button"
-                onClick={() => handleQuickTagClick(tag)}
-                className="px-2.5 py-1 rounded border border-white/25 bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold transition-colors cursor-pointer"
-              >
-                {tag.label}
-              </button>
-            ))}
+            <div className="home-art-card-info"><div><span className="home-mini-label">DESIGN & INNOVATION CENTRE</span><h3>3D Printer</h3></div><span className="home-art-arrow"><ArrowUpRight size={18} /></span></div>
+            <div className="home-art-card-foot"><span><CalendarDays size={14} /> Pick a time</span><span className="home-art-availability"><Check size={13} /> Ready to book</span></div>
           </div>
+          <div className="home-art-sticker sticker-book"><span className="sticker-book-icon"><Layers3 size={17} /></span><span>Shared by<br /><b>your campus</b></span></div>
+          <div className="home-art-caption"><span>01 / 04</span><span className="caption-line"/><span>FIND YOUR NEXT TOOL</span></div>
         </div>
-      </FadeUp>
+        <a href="#what-you-can-find" className="home-scroll-cue"><ArrowDown size={15} /> SCROLL TO EXPLORE</a>
+      </section>
 
-      {/* ── 2. INSTANT ACTION SHORTCUTS (NO TIME WASTING) ───────────────────── */}
-      <section aria-labelledby="shortcuts-heading" className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 id="shortcuts-heading" className="text-sm font-black uppercase tracking-wider text-[#1a1a1a]/70 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[#e67e22]" />
-            Fast-Track Workflows
-          </h2>
-          <span className="text-[11px] text-[#1a1a1a]/60">One-click jump</span>
+      <section className="home-category-section" id="what-you-can-find">
+        <div className="home-section-heading"><div><span className="home-kicker">A WHOLE CAMPUS, OPEN TO YOU</span><h2>What are you looking for?</h2></div><Link to="/explore" className="home-text-link">See what’s available <ArrowUpRight size={16} /></Link></div>
+        <div className="home-category-grid">{categories.map(({ icon: Icon, label, detail, color }, i) => <Link to="/login" className="home-category-card" key={label}><div className={`home-category-icon ${color}`}><Icon size={22} strokeWidth={1.8} /></div><span className="home-category-number">0{i + 1}</span><h3>{label}</h3><p>{detail}</p><ArrowUpRight className="home-category-arrow" size={17} /></Link>)}</div>
+      </section>
+
+      <section className="home-how" id="how-it-works">
+        <div className="home-how-intro"><span className="home-kicker">LESS SEARCHING. MORE DOING.</span><h2>From “I wonder if…”<br />to <em>“look what I made.”</em></h2><p>CampusCommons connects you to the things your campus already has, so your next good idea doesn’t have to wait.</p><Link to="/register" className="home-button home-button-dark">Find your next resource <ArrowRight size={16} /></Link></div>
+        <div className="home-steps">{steps.map((step) => <article className="home-step" key={step.n}><span className="home-step-number">{step.n}</span><div><h3>{step.title}</h3><p>{step.text}</p></div><ArrowUpRight className="home-step-arrow" size={17} /></article>)}</div>
+        <div className="home-how-stamp"><Users size={18} /><span>GOOD THINGS<br /><b>ARE BETTER SHARED</b></span></div>
+      </section>
+
+      <section className="home-share-section">
+        <div className="home-share-heading">
+          <span className="home-kicker">A BETTER WAY TO SHARE</span>
+          <h2>Good resources<br /><em>should get around.</em></h2>
+          <p>Useful equipment can sit idle in one corner of campus while someone else is waiting to use it. CampusCommons helps your community put those resources to work.</p>
+          <Link to="/explore" className="home-text-link">Explore the catalogue <ArrowRight size={16} /></Link>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Link
-            to="/explore"
-            className="group p-4 rounded-xl border-2 border-[#1a1a1a] bg-white shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all flex items-start gap-3.5"
-          >
-            <div className="p-2.5 rounded-lg border-2 border-[#1a1a1a] bg-[#183d2d] text-white shrink-0 group-hover:scale-105 transition-transform">
-              <Compass className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] flex items-center justify-between">
-                Browse Catalog
-                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#c0392b]" />
-              </h3>
-              <p className="text-xs text-[#1a1a1a]/70 mt-0.5 line-clamp-2">
-                All 40+ laboratory devices, workshop tooling &amp; rooms with live filters.
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            to="/bookings"
-            className="group p-4 rounded-xl border-2 border-[#1a1a1a] bg-white shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all flex items-start gap-3.5"
-          >
-            <div className="p-2.5 rounded-lg border-2 border-[#1a1a1a] bg-[#2980b9] text-white shrink-0 group-hover:scale-105 transition-transform">
-              <CalendarCheck className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] flex items-center justify-between">
-                Active Bookings
-                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#2980b9]" />
-              </h3>
-              <p className="text-xs text-[#1a1a1a]/70 mt-0.5 line-clamp-2">
-                Upcoming reservations, mobile check-ins, and waitlist position tracker.
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            to="/verification"
-            className="group p-4 rounded-xl border-2 border-[#1a1a1a] bg-white shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all flex items-start gap-3.5"
-          >
-            <div className="p-2.5 rounded-lg border-2 border-[#1a1a1a] bg-[#e67e22] text-white shrink-0 group-hover:scale-105 transition-transform">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] flex items-center justify-between">
-                ID Verification
-                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#e67e22]" />
-              </h3>
-              <p className="text-xs text-[#1a1a1a]/70 mt-0.5 line-clamp-2">
-                {isVerified ? 'Status: Confirmed verified · Ready to reserve.' : 'Upload student/staff card to unlock bookings.'}
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            to="/badges"
-            className="group p-4 rounded-xl border-2 border-[#1a1a1a] bg-white shadow-[4px_4px_0_#1a1a1a] hover:shadow-[6px_6px_0_#1a1a1a] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all flex items-start gap-3.5"
-          >
-            <div className="p-2.5 rounded-lg border-2 border-[#1a1a1a] bg-[#8e44ad] text-white shrink-0 group-hover:scale-105 transition-transform">
-              <Award className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] flex items-center justify-between">
-                Safety Badges
-                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#8e44ad]" />
-              </h3>
-              <p className="text-xs text-[#1a1a1a]/70 mt-0.5 line-clamp-2">
-                Training certificates &amp; unit approvals needed for high-risk equipment.
-              </p>
-            </div>
-          </Link>
+        <div className="home-benefit-list">
+          <article className="home-benefit"><span className="home-benefit-icon"><Compass size={22} /></span><div><span className="home-benefit-label">FOR THE CURIOUS</span><h3>Know what’s available</h3><p>Find equipment and spaces across campus, with the details you need before you book.</p></div><span className="home-benefit-count">01</span></article>
+          <article className="home-benefit"><span className="home-benefit-icon coral"><ShieldCheck size={22} /></span><div><span className="home-benefit-label">FOR THE PREPARED</span><h3>Clear requirements</h3><p>See training, access rules, and approval steps up front. No surprises after you request.</p></div><span className="home-benefit-count">02</span></article>
+          <article className="home-benefit"><span className="home-benefit-icon gold"><CalendarDays size={22} /></span><div><span className="home-benefit-label">FOR THE GETTING-IT-DONE</span><h3>One place to keep track</h3><p>Follow your request, booking, and return from a single account.</p></div><span className="home-benefit-count">03</span></article>
         </div>
       </section>
 
-      {/* ── 3. FEATURED / POPULAR EQUIPMENT (LIVE API PREVIEW) ──────────────── */}
-      <section aria-labelledby="featured-resources-heading" className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b-2 border-[#1a1a1a]/15 pb-3">
-          <div>
-            <span className="text-[10px] uppercase font-bold tracking-widest text-[#c0392b] block">
-              Live Campus Inventory
-            </span>
-            <h2 id="featured-resources-heading" className="text-xl font-black tracking-tight text-[#1a1a1a]">
-              Popular &amp; High-Demand Resources
-            </h2>
-          </div>
-
-          {/* Interactive Fast Category Switcher */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setActiveCategory('')}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all border-2 ${
-                !activeCategory
-                  ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
-                  : 'bg-white text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
-              }`}
-            >
-              All Types
-            </button>
-            {CATEGORY_OPTIONS.slice(0, 4).map((cat) => (
-              <button
-                key={cat.value}
-                type="button"
-                onClick={() => setActiveCategory(activeCategory === cat.value ? '' : cat.value)}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all border-2 ${
-                  activeCategory === cat.value
-                    ? 'bg-[#183d2d] text-white border-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]'
-                    : 'bg-white text-[#1a1a1a] border-[#1a1a1a]/40 hover:border-[#1a1a1a]'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-            <Link
-              to="/explore"
-              className="text-xs font-bold underline text-[#c0392b] hover:text-[#a93226] ml-2 shrink-0 flex items-center gap-1"
-            >
-              All in Explore →
-            </Link>
-          </div>
+      <section className="home-about-section" id="about-campuscommons">
+        <div className="home-about-top"><span className="home-kicker">ONE SHARED CAMPUS CATALOGUE</span><h2>CampusCommons makes<br /><em>sharing work.</em></h2><p>Departments and facilities can list equipment, rooms, and computing resources in one place. Campus members can find what they need, understand who can use it, and follow each request from start to finish.</p></div>
+        <div className="home-about-columns">
+          <article className="home-about-card"><span className="home-about-index">01 / FIND</span><div className="home-about-icon"><Compass size={23} /></div><h3>Discover resources across campus</h3><p>Search by name, category, or department. Each listing can show its location, opening hours, availability, and booking method, so you can make a good choice before you ask.</p><Link to="/explore" className="home-about-link">Browse the catalogue <ArrowRight size={15} /></Link></article>
+          <article className="home-about-card"><span className="home-about-index">02 / QUALIFY</span><div className="home-about-icon coral"><ShieldCheck size={23} /></div><h3>See access rules before booking</h3><p>Some resources need staff approval, a specific member type, or a training badge. CampusCommons explains what is required and points you toward the next step.</p><Link to="/register" className="home-about-link">Create your account <ArrowRight size={15} /></Link></article>
+          <article className="home-about-card"><span className="home-about-index">03 / KEEP TRACK</span><div className="home-about-icon gold"><CalendarDays size={23} /></div><h3>Follow a request through return</h3><p>See whether a request is awaiting review, approved, or in use. Check-in and return steps help borrowers and resource teams stay on the same page.</p><Link to="/login" className="home-about-link">Sign in to continue <ArrowRight size={15} /></Link></article>
         </div>
-
-        {/* Live Equipment Grid */}
-        {resourcesQuery.isPending && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((n) => (
-              <div
-                key={n}
-                className="h-64 rounded-xl border-2 border-[#1a1a1a] bg-white p-5 animate-pulse shadow-[4px_4px_0_#1a1a1a] space-y-3"
-              >
-                <div className="h-4 bg-[#ede8df] rounded w-1/3" />
-                <div className="h-6 bg-[#ede8df] rounded w-3/4" />
-                <div className="h-4 bg-[#ede8df] rounded w-1/2" />
-                <div className="h-20 bg-[#ede8df] rounded w-full mt-4" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {featuredItems.length > 0 && (
-          <StaggerList className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featuredItems.map((resource) => (
-              <StaggerItem key={resource._id}>
-                <ResourceCard resource={resource} />
-              </StaggerItem>
-            ))}
-          </StaggerList>
-        )}
-
-        {resourcesQuery.isSuccess && featuredItems.length === 0 && (
-          <div className="p-8 text-center bg-white rounded-xl border-2 border-[#1a1a1a] shadow-[4px_4px_0_#1a1a1a] space-y-2">
-            <p className="text-sm font-bold">No items found under this filter category.</p>
-            <Button variant="outline" size="sm" onClick={() => setActiveCategory('')}>
-              Clear Category Filter
-            </Button>
-          </div>
-        )}
+        <div className="home-about-note"><span className="home-about-check"><Check size={17} /></span><p><strong>Built for accountable sharing.</strong> Listings can set fair-use limits and eligibility requirements; bookings keep a clear record of requests, handovers, and returns.</p></div>
       </section>
 
-      {/* ── 4. HOW IT WORKS (ZERO-FRICTION CAMPUS WORKFLOW) ─────────────────── */}
-      <section aria-labelledby="how-it-works-heading" className="space-y-6">
-        <div className="text-center max-w-xl mx-auto space-y-1">
-          <span className="text-[10px] uppercase font-bold tracking-widest text-[#c0392b] block">
-            Streamlined Architecture
-          </span>
-          <h2 id="how-it-works-heading" className="text-xl sm:text-2xl font-black tracking-tight text-[#1a1a1a]">
-            How CampusCommons Eliminates Booking Friction
-          </h2>
-          <p className="text-xs text-[#1a1a1a]/70">
-            No paper forms, no manual approval bottlenecks, and no scheduling collisions.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {WORKFLOW_STEPS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.step}
-                className="p-5 rounded-xl border-2 border-[#1a1a1a] bg-white shadow-[4px_4px_0_#1a1a1a] flex flex-col justify-between space-y-4"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-black text-[#c0392b]">{item.step}</span>
-                    <div className="w-8 h-8 rounded-md border-2 border-[#1a1a1a] bg-[#f5f0e8] flex items-center justify-center text-[#183d2d]">
-                      <Icon className="w-4 h-4" />
-                    </div>
-                  </div>
-                  <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] pt-1">
-                    {item.title}
-                  </h3>
-                  <p className="text-xs text-[#1a1a1a]/75 leading-relaxed">
-                    {item.desc}
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-[#1a1a1a]/15 text-[10px] font-bold text-[#183d2d] flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Verified in real time
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      <section className="home-provider-cta">
+        <div className="home-provider-art" aria-hidden="true"><div className="provider-circle"><Building2 size={42} strokeWidth={1.3} /></div><span className="provider-spark spark-a">✳</span><span className="provider-spark spark-b">✳</span><span className="provider-square" /></div>
+        <div className="home-provider-copy"><span className="home-kicker">FOR DEPARTMENTS & RESOURCE TEAMS</span><h2>Have something<br />worth sharing?</h2><p>Make equipment and spaces easier to discover. List a resource, set the access rules, and keep requests organized.</p><Link to="/login" className="home-button home-button-dark">Sign in to manage resources <ArrowRight size={16} /></Link></div>
+        <span className="home-provider-note">YOUR NEXT COLLABORATION<br />MIGHT START HERE ↗</span>
       </section>
 
-      {/* ── 5. CAMPUS UNITS & PARTICIPATING CENTRES ─────────────────────────── */}
-      <section aria-labelledby="facilities-heading" className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 border-b-2 border-[#1a1a1a]/15 pb-2">
-          <div>
-            <span className="text-[10px] uppercase font-bold tracking-widest text-[#e67e22] block">
-              Multi-Department Hub
-            </span>
-            <h2 id="facilities-heading" className="text-xl font-black tracking-tight text-[#1a1a1a]">
-              Participating NIT Jamshedpur Units
-            </h2>
-          </div>
-          <span className="text-xs text-[#1a1a1a]/60">Centralized governance · Single login</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {CAMPUS_FACILITIES.map((facility) => (
-            <div
-              key={facility.code}
-              className="p-5 rounded-xl border-2 border-[#1a1a1a] bg-[#ede8df]/60 shadow-[4px_4px_0_#1a1a1a] flex flex-col justify-between gap-3"
-            >
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-black px-2 py-0.5 rounded border border-[#1a1a1a] bg-white text-[#183d2d]">
-                    {facility.code}
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded border border-[#1a1a1a]/30 bg-white/70 text-[#1a1a1a]">
-                    {facility.badge}
-                  </span>
-                </div>
-                <h3 className="text-sm font-black tracking-tight text-[#1a1a1a] pt-1">
-                  {facility.name}
-                </h3>
-                <p className="text-xs text-[#1a1a1a]/80 leading-relaxed">
-                  {facility.focus}
-                </p>
-              </div>
-
-              <div className="pt-2 flex items-center justify-between text-xs">
-                <Link
-                  to={`/explore?q=${encodeURIComponent(facility.code)}`}
-                  className="font-bold underline text-[#183d2d] hover:text-[#c0392b] flex items-center gap-1"
-                >
-                  View unit equipment →
-                </Link>
-                <span className="text-[11px] text-[#1a1a1a]/60 font-semibold">NIT JSR Campus</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── 6. STATS & RELIABILITY BANNER ───────────────────────────────────── */}
-      <section className="rounded-xl border-2 border-[#1a1a1a] bg-white p-6 shadow-[4px_4px_0_#1a1a1a] grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-        <div>
-          <div className="text-2xl sm:text-3xl font-black text-[#c0392b]">40+</div>
-          <div className="text-xs font-bold text-[#1a1a1a]/70 uppercase tracking-wider mt-1">
-            Lab Devices
-          </div>
-        </div>
-        <div>
-          <div className="text-2xl sm:text-3xl font-black text-[#183d2d]">100%</div>
-          <div className="text-xs font-bold text-[#1a1a1a]/70 uppercase tracking-wider mt-1">
-            Slot Collisions Prevented
-          </div>
-        </div>
-        <div>
-          <div className="text-2xl sm:text-3xl font-black text-[#2980b9]">&lt; 60s</div>
-          <div className="text-xs font-bold text-[#1a1a1a]/70 uppercase tracking-wider mt-1">
-            Search to Reserve
-          </div>
-        </div>
-        <div>
-          <div className="text-2xl sm:text-3xl font-black text-[#e67e22]">24/7</div>
-          <div className="text-xs font-bold text-[#1a1a1a]/70 uppercase tracking-wider mt-1">
-            IST Calendar Engine
-          </div>
-        </div>
-      </section>
-    </div>
+      <footer className="home-footer"><Link to="/" className="home-brand"><span className="home-brand-mark">CC</span><span>Campus<span className="home-brand-light">Commons</span></span></Link><span>Built for the things you’re here to make.</span><Link to="/login" className="home-footer-link">Campus sign in <ArrowUpRight size={14} /></Link></footer>
+    </main>
   );
 }
-

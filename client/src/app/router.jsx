@@ -13,6 +13,7 @@ import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 import LoginPage from '../features/auth/LoginPage';
 import RegisterPage from '../features/auth/RegisterPage';
 import VerifyOtpPage from '../features/auth/VerifyOtpPage';
+import HomePage from '../pages/HomePage';
 
 // Lazy loaded pages (declared in components/LazyPages.jsx, a components-only module)
 import {
@@ -24,7 +25,6 @@ import {
   ExplorePage,
   HandoverPage,
   HandoversPage,
-  HomePage,
   IncidentDetailPage,
   IncidentListPage,
   LazyPage,
@@ -50,6 +50,7 @@ let pageKey = 0;
 const page = (element) => <LazyPage key={`page-${++pageKey}`}>{element}</LazyPage>;
 
 export const router = createBrowserRouter([
+  { path: '/', element: <HomePage /> },
   // ── Public auth routes ──────────────────────────────────────────────────────
   {
     path: '/login',
@@ -161,5 +162,5 @@ export const router = createBrowserRouter([
   },
 
   // ── Fallback redirects ──────────────────────────────────────────────────────
-  { path: '*', element: <Navigate to="/" replace /> },
+  { path: '*', element: <Navigate to="/explore" replace /> },
 ]);
