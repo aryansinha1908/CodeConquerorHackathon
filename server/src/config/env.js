@@ -79,6 +79,11 @@ export function checkEnv(env = process.env) {
       `TRUST_PROXY_HOPS must be a whole number from 0 to ${MAX_TRUST_PROXY_HOPS}; using ${DEFAULT_TRUST_PROXY_HOPS}.`,
     );
 
+  if (!isSet(env.GEMINI_API_KEY))
+    warnings.push(
+      "GEMINI_API_KEY is not set: AI search and the AI photo comparison answer 503, and regular search carries on.",
+    );
+
   const cloudinaryMissing = CLOUDINARY.filter((name) => !isSet(env[name]));
   if (cloudinaryMissing.length)
     warnings.push(

@@ -35,6 +35,7 @@ const complete = () => ({
   CLOUDINARY_API_KEY: "cloud-key-value",
   CLOUDINARY_API_SECRET: "cloud-secret-value",
   SMTP_HOST: "smtp.example.com",
+  GEMINI_API_KEY: "gemini-key-value",
   SMTP_USER: "smtp-user-value",
   SMTP_PASS: "smtp-pass-value",
   MAIL_FROM: "CampusCommons <codes@example.com>",

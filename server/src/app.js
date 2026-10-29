@@ -9,6 +9,7 @@ import { trustProxyHops } from "./config/env.js";
 import { pingRedis } from "./config/redis.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
+import aiRoutes from "./routes/ai.js";
 import auditRoutes from "./routes/audit.js";
 import badgeRequestRoutes from "./routes/badgeRequests.js";
 import badgeRoutes from "./routes/badges.js";
@@ -61,6 +62,7 @@ app.use("/api/v1/audit", auditRoutes);
 app.use("/api/v1/uploads", uploadRoutes);
 app.use("/api/v1/verification", verificationRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/ai", aiRoutes);
 
 // architecture.md §13.3: 503 only when MongoDB is down. Without Redis the API still serves, with no
 // cache and bookings answering 503 (§10.2), so Redis being down is "degraded", not down.

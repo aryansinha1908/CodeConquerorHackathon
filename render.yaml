@@ -123,7 +123,15 @@ services:
       - key: CRON_ENABLED
         value: "true"
 
-      # AI quota: read only once AI features exist; the defaults from .env.example.
+      # Google Gemini (AI search, AI photo comparison): a key from Google AI Studio. Without it those
+      # answer 503 and regular search carries on. GEMINI_MODEL is optional (default gemini-2.5-flash).
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+
+      # AI quota: per user per day (per demo account and network for the demo accounts) and global
+      # caps; keep the global ones below what AI Studio shows for the key.
       - key: AI_USER_BURST_SECONDS
         value: "10"
       - key: AI_USER_DAILY_LIMIT
