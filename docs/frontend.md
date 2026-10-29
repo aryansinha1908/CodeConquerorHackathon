@@ -138,7 +138,7 @@
 ```
 client/
 ├── index.html
-├── vite.config.js            # react(), tailwindcss(), server.proxy['/api']
+├── vite.config.js            # react(), tailwindcss(), server.proxy['/api'], vendor chunks (Rolldown codeSplitting)
 ├── vercel.json               # rewrite /api/* → Render, SPA fallback
 └── src/
     ├── main.jsx  App.jsx
@@ -247,30 +247,58 @@ client/
 
 ### 8.2 Query keys and invalidation
 
+The keys as the app builds them: each feature's `api.js` exports its key factory (`resourceKeys`, `bookingKeys`, `incidentKeys`, `notificationKeys`, `badgeRequestKeys` / `badgeKeys`, `manageResourceKeys`, `adminKeys`, `auditKeys`, `verificationKeys`, `orgUnitKeys`; the dashboard's `incidentCountKey` is in `features/manage/dashboard/counts.js`), and pages build their keys through these. Object parts are the request's normalised query parameters, so two pages asking for the same thing share one cache entry. The signed-in user is not a query: it lives in the Zustand store (`POST /auth/refresh` and `GET /auth/me` at boot, `GET /auth/me` again after a verification change).
+
+"On focus" means `staleTime: 0`: refetched whenever a page mounts it and when the window regains focus. The api.js hooks retry a read once on a network error or a 5xx and never on a 4xx (`retryReads`, lib/errors.js); the four queries written in the verification pages use the client default (one retry). Lists keep the previous page on screen while the next one loads, but never another filter's or tab's rows.
+
 | Query key | Source | Refetch |
 |---|---|---|
-| `['me']` | `GET /auth/me` | on focus |
-| `['resources', filters]` | `GET /resources` | stale 60 s (matches the server cache) |
-| `['resource', id]` | `GET /resources/:id` | stale 5 min |
-| `['resource', id, 'availability', range]` | `GET /resources/:id/availability` | stale 15 s |
-| `['resource', id, 'eligibility', slot]` | `GET /resources/:id/eligibility` | stale 0 |
-| `['bookings', 'mine', status]` | `GET /bookings/mine` | on focus |
-| `['bookings', 'manage', filters]` | `GET /bookings/manage` | every 30 s while open |
-| `['booking', id]`, `['booking', id, 'timeline']` | detail and timeline | on focus |
-| `['notifications', 'unread-count']` | polling | **every 30 s** |
-| `['badges']`, `['badges', 'mine']`, `['badge-requests']` | badges | on focus |
-| `['incidents', filters]`, `['incident', id]` | incidents | on focus |
-| `['admin', 'verifications', status]`, `['audit', filters]` | admin | on focus |
+| `['resources', params]` | `GET /resources` (Explore) | stale after 60 s (matches the server cache) |
+| `['resources', 'manage', params]` | `GET /resources` (`/manage/resources`) | on focus |
+| `['resources', 'reportable', params]` | `GET /resources?status=active,maintenance` (the report page's resource picker) | stale after 60 s |
+| `['resources', 'incident-filter', params]` | `GET /resources?status=active,maintenance,archived&limit=50` (the incident list's resource filter) | stale after 5 min |
+| `['resource', id]` | `GET /resources/:id` | stale after 5 min |
+| `['resource', id, 'availability', { from, to }]` | `GET /resources/:id/availability` (the 7-day grid) | stale after 15 s |
+| `['resource', id, 'eligibility', null]` | `GET /resources/:id/eligibility` (checklist and quota) | on focus |
+| `['resource', id, 'eligibility', { start, end }]` | `POST /bookings/check` (the booking panel's live pre-check; saves nothing) | on focus |
+| `['org-units', 'active']` | `GET /org-units` (Explore's filter, the ID-card form, the admin queue) | stale after 5 min |
+| `['bookings', 'mine', { status, page, limit }]` | `GET /bookings/mine` | on focus |
+| `['bookings', 'manage', filters]` | `GET /bookings/manage` (review queue, handovers, dashboard counts) | **every 30 s** while open |
+| `['booking', id]`, `['booking', id, 'timeline']` | `GET /bookings/:id`, `GET /bookings/:id/timeline` | on focus |
+| `['notifications', 'unread-count']` | `GET /notifications/unread-count`; also set from each list answer's `meta.unread` | **every 30 s** while the tab is visible, and on focus |
+| `['notifications', 'list', { unread, page, limit }]` | `GET /notifications` (the bell: the latest 5, fetched each time it opens; the page: 20 a page) | on focus |
+| `['badge-requests', { status, page, limit }]` | `GET /badge-requests` (`/manage/badges`; the dashboard's count) | on focus; the dashboard count every 30 s |
+| `['badges', 'catalogue']` | `GET /badges` (the listing form's badge picker) | stale after 5 min |
+| `['badges', 'catalogue', { orgUnit }]` | `GET /badges?orgUnit=` (the grant dialog: one per managed unit, `orgUnit: null` for an admin) | stale after 60 s |
+| `['badges', …]`, e.g. `['badges', 'mine']` | the member's `/badges` page (a teammate's; keys other than `'catalogue'` are its own) | its own; badge decisions and grants invalidate `['badges', 'mine']` |
+| `['incidents', params]` | `GET /incidents` (`/manage/incidents`, `/admin/incidents`) | on focus |
+| `['incidents', 'count', { status: 'open,in_review', page: 1, limit: 1 }]` | `GET /incidents` (the dashboard's open-incident count) | **every 30 s** |
+| `['incident', id]` | `GET /incidents/:id` | on focus |
+| `['verification', 'status']` | `GET /verification/status` | on focus |
+| `['admin', 'verifications', status, page]` | `GET /admin/verifications` | on focus |
+| `['audit', params]` | `GET /audit` (off while the filter form has an error) | on focus |
+| `['admin', 'users', { q, limit: 5 }]` | `GET /admin/users?q=` (the audit log's actor search, from 2 characters) | stale after 30 s |
 
-| Mutation | Invalidates |
-|---|---|
-| Create booking / cancel | `['bookings','mine']`, `['resource', id, 'availability']`, `['resource', id, 'eligibility']` |
-| Approve / reject / waitlist | `['bookings','manage']`, `['booking', id]` |
-| Check-in / check-out / confirm return | `['booking', id]`, `['booking', id, 'timeline']`, `['bookings', …]` |
-| Resource create / edit / status | `['resources']`, `['resource', id]` |
-| Badge decision | `['badge-requests']`, `['badges','mine']` |
+Never cached: the ID-card link (`GET /admin/verifications/:userId/id-card`) and the badge-evidence link (`GET /badge-requests/:id/evidence`) are mutations, because each opening is one audited request and the signed URL expires.
 
-**No optimistic updates on lifecycle actions.** Approvals, check-ins and the like wait for the server's answer so the UI never shows a state the server rejected. Optimistic updates are used only for "mark notification read".
+Invalidation is by prefix, so `['resources']` also refreshes the manager's list and both incident pickers, `['incidents']` the dashboard's incident count, and `['bookings']` every booking list and count.
+
+| Mutation | Invalidates | Also |
+|---|---|---|
+| Create booking, approve / reject / waitlist, cancel, check-in, check-out | `['bookings']`, `['booking', id]`, `['resource', resourceId, 'availability']`, `['resource', resourceId, 'eligibility']` | the same after `INVALID_TRANSITION`, `NOT_FOUND`, `SLOT_TAKEN` or `INELIGIBLE`, as the screen is out of date |
+| Confirm return | the same, plus `['incidents']` when it opened an incident | |
+| Resource create | `['resources']` | the answer goes straight into `['resource', id]` |
+| Resource edit / status change | `['resources']`, `['resource', id]` (so its availability and eligibility too) | edit writes the answer into `['resource', id]`; the same keys after `INVALID_TRANSITION` / `NOT_FOUND` |
+| Report incident, comment | `['incidents']`; for an incident on a booking, `['booking', bookingId]` | the answer goes into `['incident', id]` |
+| Resolve incident | `['incidents']`; for an incident on a booking, `['booking', bookingId]` and `['bookings']` (a resolve may complete the booking) | the answer goes into `['incident', id]`; `INVALID_TRANSITION` / `NOT_FOUND` / `FORBIDDEN` refetch `['incident', id]` |
+| Badge decision, direct grant | `['badge-requests']`, `['badges', 'mine']` | a request decided elsewhere refetches `['badge-requests']`; granting a badge that is gone refetches `['badges']` |
+| Verification decision (admin) | `['admin', 'verifications']` | also after `INVALID_TRANSITION` / `NOT_FOUND`, or a 404 on "View ID" |
+| ID-card upload | none | the answer goes into `['verification', 'status']` and `GET /auth/me` into the store; a 409 refetches `['verification', 'status']` |
+| Mark read, mark all read | `['notifications']` once settled | mark read is optimistic (below) |
+| The unread count goes up (the bell notices) | `['notifications', 'list']` | |
+| Logout | `queryClient.clear()` | |
+
+**No optimistic updates on lifecycle actions.** Approvals, check-ins and the like wait for the server's answer so the UI never shows a state the server rejected; each mutation's `onSuccess` returns its invalidation, so the button stays busy until the refetched data is on screen. Optimistic updates are used only for "mark notification read": the lists and the count change at once and roll back if the request fails.
 
 ### 8.3 Error handling
 - `http.js` normalises every error to `{ status, code, message, details, requestId }`.

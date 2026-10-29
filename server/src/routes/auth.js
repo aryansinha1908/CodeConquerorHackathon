@@ -4,7 +4,10 @@
 //
 // The input check runs BEFORE the limiter (architecture.md §11): the email and role limiters key on
 // req.body.email / req.body.role and need them validated and lower-cased, and a typo in the form
-// shouldn't use up one of register's 3 attempts an hour.
+// shouldn't use up one of register's 3 attempts an hour. register, login, resend-otp and demo-login
+// each run a stack (middleware/rateLimit.js): the email or role tier, plus coarse ceilings per client
+// IP. Codes go out under a daily share per network (otpSendIp) and a global daily cap, checked in the
+// service where they are sent.
 //
 // Sessions answer { accessToken, user } and set the refresh cookie, httpOnly and scoped to this path.
 import express from "express";
@@ -12,6 +15,7 @@ import { verifyAuth } from "../middleware/auth.js";
 import {
   demoLimiter,
   generalLimiter,
+  ipKey,
   loginLimiter,
   markPasswordMatched,
   otpSendLimiter,
@@ -126,7 +130,7 @@ router.post(
   async (req, res) => {
     let session;
     try {
-      session = await login(req.body);
+      session = await login(req.body, { network: ipKey(req) });
     } catch (err) {
       // 403 EMAIL_NOT_VERIFIED after the right password: this browser may enter the code, and the
       // login tier doesn't count it as a failed attempt.

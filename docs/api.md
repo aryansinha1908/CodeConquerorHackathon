@@ -46,7 +46,7 @@ The HTTP API as built. This is the contract the client is written against: when 
 | `INELIGIBLE` | 422 | Booking create. `details` lists the failed rules. |
 | `RATE_LIMITED` | 429 | See [Rate limits](#rate-limits). |
 | `INTERNAL` | 500 | — |
-| `SERVICE_UNAVAILABLE` | 503 | Redis (codes, refresh, booking create/approve) or Cloudinary is down or not configured. Retry later. |
+| `SERVICE_UNAVAILABLE` | 503 | Redis (codes, refresh, booking create/approve) or Cloudinary is down or not configured, or today's code emails are used up (see [Rate limits](#rate-limits); that one has `details: { retryAfterSeconds }` and `Retry-After`). Retry later. |
 
 ### Auth and roles
 
@@ -73,19 +73,28 @@ The HTTP API as built. This is the contract the client is written against: when 
 | Tier | Limit | Counted per | Routes | What counts |
 |---|---|---|---|---|
 | `general` | 300 / 5 min | user | Every authenticated route, plus `/auth/refresh` and `/auth/logout` (counted for the refresh cookie's user) | Every request |
-| `login` | 5 / 15 min | email | `POST /auth/login` | Responses ≥ 400 only, except `403 EMAIL_NOT_VERIFIED`: the password was right, so it isn't a failed attempt |
+| `login` | 5 / 15 min | email | `POST /auth/login` | Responses ≥ 400 only, except `403 EMAIL_NOT_VERIFIED`: the password was right, so it isn't a failed attempt. A login `loginIp` refuses isn't counted here either |
+| `loginIp` | 100 / 15 min | client IP | `POST /auth/login`, after `login` | The same failures as `login`, from every account. Only requests `login` let through |
 | `register` | 3 / hour | email | `POST /auth/register` | Every request that passes validation |
+| `registerIp` | 100 / hour | client IP | `POST /auth/register`, after `register` | Every request that passes validation and `register` |
 | `otpSend` and `otpSendDaily` | 3 / 15 min and 10 / day | email | `POST /auth/resend-otp`, and the code `POST /auth/login` emails to an unverified account | Every resend-otp request that passes validation, and every code login would email. Once either is used up, login sends no code (it still answers `403 EMAIL_NOT_VERIFIED`) |
+| `otpSendIp` | 50 / day | client IP | `POST /auth/register` after `registerIp`, `POST /auth/resend-otp` after `otpSendDaily`, and the code `POST /auth/login` emails to an unverified account | Every request the tiers before it let through, and every code login would email. One network's share of the code-email cap. Once it is used up, login sends no code (it still answers `403 EMAIL_NOT_VERIFIED`) |
 | `otpVerify` | 10 / 15 min | email | `POST /auth/verify-otp` | Every request that passes validation |
-| `demo` | 60 / 15 min | demo role | `POST /auth/demo-login` | Every request that passes validation |
+| `demoIp` | 60 / 15 min | demo role and client IP | `POST /auth/demo-login` | Every request that passes validation. Judges on other networks are unaffected |
+| `demo` | 1000 / 15 min | demo role | `POST /auth/demo-login`, after `demoIp` | Every request that passes validation and `demoIp` |
 | `bookingCreate` | 10 / hour | user | `POST /bookings` | Every request past the suspension check, refused ones included |
 | `upload` | 20 / hour, shared by its routes | user | `POST /uploads/images`, `POST /verification/id-card`, and `POST /badges/:id/requests` when sent as multipart | Every request that reaches it (each route says where it sits) |
 | `fileLink` | 20 / 15 min, shared by its routes | user | `GET /badge-requests/:id/evidence`, `GET /admin/verifications/:userId/id-card` | Every request past the general tier. Each link costs a Cloudinary API call from a quota every reviewer shares |
 
-- A 429 is `RATE_LIMITED` with `details: { tier, limit, retryAfterSeconds }`.
+- A 429 is `RATE_LIMITED` with `details: { tier, limit, retryAfterSeconds }`. The message says whose limit it is: "…for this account", "…from your network", "This demo account is being used a lot right now".
 - A 429 also has `Retry-After`, `RateLimit` and `RateLimit-Policy` headers. Use `details.retryAfterSeconds`, because cross-origin scripts can read only `X-Request-Id`.
-- Validation runs before the email and role tiers, so a typo isn't counted.
-- While Redis is down, no limit is enforced.
+- Validation runs before the email and role tiers, so a typo isn't counted. Where two tiers stack, the first one listed runs first, and a request it refuses isn't counted by the second.
+- The client IP is every address the trusted proxies forwarded (`TRUST_PROXY_HOPS`, 2 behind Vercel): through the site, the visitor's address and then Vercel's. IPv6 is counted per /56. Through the site, sending `X-Forwarded-For` yourself changes nothing, because Vercel replaces it. Calling the Render URL directly, what you send only ever gets you a fresh counter, never someone else's.
+- **Code emails:** at most 50 a day per network (`otpSendIp`, a 429), and at most 250 in any 24 hours to everyone together. Once the 250 are used up:
+  - `POST /auth/register` and `POST /auth/resend-otp` answer **503 `SERVICE_UNAVAILABLE`** "We've reached today's limit for emailing codes, so no code was sent. Try again in 3 hours." with `details: { retryAfterSeconds }` and `Retry-After`. Show the message. Nothing is created or changed, so the last code sent still works.
+  - resend-otp answers this for every address, existing or not.
+  - `POST /auth/login` on an unverified account still answers `403 EMAIL_NOT_VERIFIED`, with "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later." and no new code.
+- While Redis is down, no limit is enforced (the code routes answer 503 anyway).
 - `GET /auth/demo-config` and `GET /health` have no limit.
 
 ### Values
@@ -138,10 +147,10 @@ The HTTP API as built. This is the contract the client is written against: when 
 
 | Method | Path | Who | Input | Returns (`data`) | Errors to handle |
 |---|---|---|---|---|---|
-| POST | `/auth/register` | public | body `{ name, email, password }` | **201** `{ email, otpSent: true }`. Sets `signupProof`. A 6-digit code is emailed; it expires in 10 minutes. Registering an unverified email again replaces its name and password and sends a new code | 400 (`name`, `email`, `password`); 409 `EMAIL_TAKEN` "An account with this email already exists. Sign in instead."; 429 `register`; 503 "We can't send or check codes right now. Try again in a minute." (nothing is created) |
+| POST | `/auth/register` | public | body `{ name, email, password }` | **201** `{ email, otpSent: true }`. Sets `signupProof`. A 6-digit code is emailed; it expires in 10 minutes. Registering an unverified email again replaces its name and password and sends a new code | 400 (`name`, `email`, `password`); 409 `EMAIL_TAKEN` "An account with this email already exists. Sign in instead."; 429 `register`, `registerIp` or `otpSendIp` "Too many verification codes asked for from your network today. Try again in 1 day."; 503 "We can't send or check codes right now. Try again in a minute." (nothing is created) |
 | POST | `/auth/verify-otp` | public, with this browser's `signupProof` cookie | body `{ email, otp }` (`otp`: the 6 digits as a string) | Session. The email is now verified, and `signupProof` is cleared | 400 `VALIDATION_ERROR` (`email`; `otp` "Required." / "Must be the 6-digit code."); 400 `INVALID_OTP` (messages below); 429 `otpVerify`; 503 |
-| POST | `/auth/resend-otp` | public | body `{ email }` | `{ sent: true, retryAfter: 60 }` for every address. Only an existing unverified account gets a code. A new code replaces the old one and resets its tries. Wait `retryAfter` seconds before offering "resend" again | 400 `email`; 429 `otpSend` or `otpSendDaily`; 503 |
-| POST | `/auth/login` | public | body `{ email, password }` | Session | 400 (`email`, `password`); **401 `INVALID_CREDENTIALS`** "That email and password don't match an account." (unknown emails too); **403 `EMAIL_NOT_VERIFIED`** "Verify your email first. We've sent a 6-digit code to your inbox." with `details: { email }`, which also sets `signupProof` and emails a fresh code unless one went out in the last 60 s, or the address has used up `otpSend` or `otpSendDaily` (a code emailed here counts against both). Then nothing is sent and the message is "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later." Either way, go to the code screen and call verify-otp; 429 `login`; 503 (only for an unverified account while Redis is down) |
+| POST | `/auth/resend-otp` | public | body `{ email }` | `{ sent: true, retryAfter: 60 }` for every address. Only an existing unverified account gets a code. A new code replaces the old one and resets its tries. Wait `retryAfter` seconds before offering "resend" again | 400 `email`; 429 `otpSend`, `otpSendDaily` or `otpSendIp`; 503 |
+| POST | `/auth/login` | public | body `{ email, password }` | Session | 400 (`email`, `password`); **401 `INVALID_CREDENTIALS`** "That email and password don't match an account." (unknown emails too); **403 `EMAIL_NOT_VERIFIED`** "Verify your email first. We've sent a 6-digit code to your inbox." with `details: { email }`, which also sets `signupProof` and emails a fresh code unless one went out in the last 60 s, or the address has used up `otpSend` or `otpSendDaily`, or the network `otpSendIp` (a code emailed here counts against all three). Then nothing is sent and the message is "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later." Either way, go to the code screen and call verify-otp; 429 `login`; 503 (only for an unverified account while Redis is down) |
 | POST | `/auth/refresh` | holder of the `refreshToken` cookie; no Authorization header | none | Session; the cookie is rotated | **401 `UNAUTHENTICATED`**, which also clears the cookie, so show the login page. Reasons: no, bad or expired cookie, logged out, or deleted user: "Your session has ended. Sign in again."; reused cookie: "Your session was ended for your security. Sign in again."; demo account while demo mode is off: "Demo accounts are switched off. Sign in again." Also 429 `general`; **503** "Sign-in is briefly unavailable. Try again in a minute.", which keeps the cookie, so retry later |
 | POST | `/auth/logout` | anyone; no Authorization header needed | none | `{ loggedOut: true }`, always. Ends this cookie's session and clears the cookie | 429 `general` only |
 | GET | `/auth/me` | signed-in user | — | User view | 401 (bad token; "Your account no longer exists."; "Demo accounts are switched off. Sign in again."); 429 |

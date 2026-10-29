@@ -9,6 +9,10 @@ import jwt from "jsonwebtoken";
 import { useMailTransport } from "../../src/config/mailer.js";
 import { useRedisClient } from "../../src/config/redis.js";
 import { keys, TTL } from "../../src/lib/redisKeys.js";
+import {
+  OTP_EMAIL_CAP,
+  otpEmailsLeft,
+} from "../../src/middleware/rateLimit.js";
 import { AuditLog, User } from "../../src/models/index.js";
 import {
   BCRYPT_COST,
@@ -1010,6 +1014,153 @@ describe("auth service", { skip }, () => {
       assert.deepEqual(me, user);
       await User.deleteOne({ _id: user._id });
       assertError(await failure(getMe(user._id)), 401, "UNAUTHENTICATED");
+    });
+  });
+
+  describe("the global cap on code emails (architecture.md §11)", () => {
+    const sentInWindow = () => redis.zcard(keys.otpEmailLog);
+    // `count` code emails sent `minutesAgo` minutes ago, by anyone.
+    async function alreadySent(count, minutesAgo = 60) {
+      const at = Date.now() - minutesAgo * 60_000;
+      const members = [];
+      for (let i = 0; i < count; i++) members.push(at + i, `earlier-${i}`);
+      await redis.zadd(keys.otpEmailLog, ...members);
+    }
+    const usedUp = (err) => {
+      assertError(err, 503, "SERVICE_UNAVAILABLE");
+      assert.match(
+        err.message,
+        /^We've reached today's limit for emailing codes, so no code was sent\. Try again in /,
+      );
+      assert.ok(err.details.retryAfterSeconds > 0);
+      assert.equal(
+        err.headers["Retry-After"],
+        String(err.details.retryAfterSeconds),
+      );
+    };
+
+    test("every code register, resend-otp and login email takes one slot", async () => {
+      await signUp();
+      assert.equal(await sentInWindow(), 1);
+      await resent(EMAIL);
+      assert.equal(await sentInWindow(), 2);
+      await redis.expire(keys.otp(EMAIL), TTL.otpSeconds - 61);
+      await failure(login({ email: EMAIL, password: PASSWORD }));
+      assert.equal(mailsTo(EMAIL).length, 3);
+      assert.equal(await sentInWindow(), 3);
+      // Addresses that get no code take none.
+      await account("verified1@nitjsr.ac.in");
+      for (const email of ["nobody@nitjsr.ac.in", "verified1@nitjsr.ac.in"])
+        await resendOtp({ email });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(await sentInWindow(), 3);
+    });
+
+    test("register is 503 once the cap is used up, before anything is created or changed", async () => {
+      await signUp();
+      const before = await User.findOne({ email: EMAIL })
+        .select("+passwordHash")
+        .lean();
+      mails.length = 0;
+      await alreadySent(OTP_EMAIL_CAP.limit - 1);
+      // An unverified account signing up again keeps its password and its code.
+      usedUp(await failure(signUp({ password: "another2024" })));
+      const after = await User.findOne({ email: EMAIL })
+        .select("+passwordHash")
+        .lean();
+      assert.equal(after.passwordHash, before.passwordHash);
+      usedUp(await failure(signUp({ email: "2024ugcs111@nitjsr.ac.in" })));
+      assert.equal(
+        await User.countDocuments({ email: "2024ugcs111@nitjsr.ac.in" }),
+        0,
+      );
+      assert.equal(mails.length, 0);
+      // A verified email is still 409, which says nothing new.
+      await account("verified1@nitjsr.ac.in");
+      assertError(
+        await failure(signUp({ email: "verified1@nitjsr.ac.in" })),
+        409,
+        "EMAIL_TAKEN",
+      );
+    });
+
+    test("the wait is until the oldest send drops out of the 24 hours", async () => {
+      await alreadySent(OTP_EMAIL_CAP.limit, 22 * 60);
+      const err = await failure(signUp());
+      usedUp(err);
+      assert.ok(Math.abs(err.details.retryAfterSeconds - 2 * 3600) <= 5);
+      assert.match(err.message, /Try again in 2 hours\.$/);
+    });
+
+    test("resend-otp is 503 for every address once the cap is used up", async () => {
+      await signUp();
+      await account("verified1@nitjsr.ac.in");
+      await alreadySent(OTP_EMAIL_CAP.limit);
+      for (const email of [
+        EMAIL,
+        "nobody@nitjsr.ac.in",
+        "verified1@nitjsr.ac.in",
+      ])
+        usedUp(await failure(resendOtp({ email })));
+      assert.equal(mailsTo(EMAIL).length, 1, "only the sign-up code");
+    });
+
+    test("a cap used up between resend-otp's answer and its send sends nothing, and says so in the log", async () => {
+      await signUp();
+      await otpEmailsLeft(); // defines the cap's script on the mock before it is wrapped
+      await alreadySent(OTP_EMAIL_CAP.limit - 2); // the sign-up took one: one slot is left
+      useRedisClient(
+        new Proxy(redis, {
+          get(target, prop) {
+            if (prop === "otpEmailSlot")
+              return async (...args) => {
+                // Someone else takes the last slot just before the resend's own take.
+                if (args[4] !== "")
+                  await target.zadd(
+                    keys.otpEmailLog,
+                    Date.now(),
+                    "someone-else",
+                  );
+                return target.otpEmailSlot(...args);
+              };
+            const value = target[prop];
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
+      );
+      assert.deepEqual(await resendOtp({ email: EMAIL }), {
+        sent: true,
+        retryAfter: 60,
+      });
+      await waitFor(
+        () => warnings.some(([, message]) => /cap ran out/.test(message)),
+        "the warning",
+      );
+      assert.equal(mailsTo(EMAIL).length, 1);
+    });
+
+    test("login answers 403 without a code once the cap is used up, and the last code still works", async () => {
+      await signUp();
+      const code = codeFor(EMAIL);
+      await redis.expire(keys.otp(EMAIL), TTL.otpSeconds - 61);
+      await alreadySent(OTP_EMAIL_CAP.limit);
+      const err = await failure(login({ email: EMAIL, password: PASSWORD }));
+      assertError(err, 403, "EMAIL_NOT_VERIFIED");
+      assert.equal(
+        err.message,
+        "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later.",
+      );
+      assert.equal(mailsTo(EMAIL).length, 1);
+      assert.ok((await verifyOtp({ email: EMAIL, otp: code })).accessToken);
+    });
+
+    test("with the address's own limits used up, login takes no slot", async () => {
+      await signUp();
+      for (const tier of ["otpSend", "otpSendDaily"])
+        await redis.set(`rl:${tier}:${EMAIL}`, 100, "PX", 60_000);
+      await redis.expire(keys.otp(EMAIL), TTL.otpSeconds - 61);
+      await failure(login({ email: EMAIL, password: PASSWORD }));
+      assert.equal(await sentInWindow(), 1, "only the sign-up's");
     });
   });
 

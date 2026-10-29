@@ -2,7 +2,7 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **Now integrating the frontend and the backend** in five phases (§11); Phase 1 (real auth and the seed) is committed locally on `Aryan`, not pushed.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11) are committed locally on `Aryan` and not pushed. The judge script passes end to end (`npm run golden-path`).
 
 **Team change:** the auth teammate has stopped; the frontend teammate is doing `/badges` and one more page (to be confirmed). Everything else is integration work on `Aryan`.
 
@@ -275,6 +275,22 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
    - ✅ **4a:** shared kit (StatusBadge, Dialog, ReasonDialog, ConfirmDialog, ErrorState, Pagination, PhotoUploader, BookingTimeline, IST helpers in `lib/time.js`), the bookings API module and hooks; Explore, resource detail with the server's eligibility checklist, QuotaMeter, AvailabilityGrid and the BookingPanel; My bookings, booking detail, check-in and check-out; the manager's conflict queue, handovers and return confirmation. Mock data deleted. 21 review findings (all client): 17 fixed, 4 duplicates. 191 client tests; the client's API modules were also run against the real server on a seeded database.
    - ✅ **4b:** incident pages (report, detail with thread and resolve, manage and admin lists), `/admin/audit` with deep links, `/manage/resources` and the full listing form, notifications and the header bell, the manage dashboard, and `/manage/badges` (in its own files, in case the teammate's version replaces it). Server: the six fixes found while writing `docs/api.md`, the badge-evidence viewer, grant by email, `GET /admin/users`, and demo accounts kept away from real members' evidence and grants. 16 seeded demo bookings in every state, made through the services. 22 review findings: 19 fixed, 3 duplicates. 693 server tests, 299 client tests.
    - **`npm run golden-path -- <api url>`** walks judge steps 1–12 over HTTP with the demo logins and cleans up after itself. It passes all 12 steps on a fresh seed. Afterwards the demo student holds 3D Printing Basics, so run `npm run seed` again before a real demo.
-5. **Phase 5: hardening and deploy** (Render, Vercel, Atlas, Upstash).
+5. ✅ **Phase 5: hardening and deploy prep.**
+   - **Client:** vendor chunks and lazy loading (no chunk over 500 kB), the Dashboard tab, the `/admin` redirect, edit and report links on the resource page, contrast fixes; `frontend.md` §8.2 rewritten from the real query keys.
+   - **Server:** `trust proxy`, start-up checks (production refuses to boot without its secrets), coarse per-IP ceilings stacked on the email and role limits, a daily OTP-email cap with a per-network share, and a boot warning when `DEMO_MODE` is on and real accounts exist.
+   - **Deploy:** `render.yaml`, `client/vercel.json` (SPA fallback, `/api` rewrite, CSP and security headers), `docs/deploy.md` (step-by-step checklist, including the secret rotation), and a real `README.md`.
+   - **Review:** 10 findings (1 high: with one trusted hop, everyone behind Vercel shared one IP bucket), 7 fixed, 2 duplicates, 2 deferred (below).
+   - **Tests:** 738 server tests and 308 client tests; the golden path passes 12/12 after the hardening.
+
+**Open, in priority order:**
+1. **The member's `/badges` page (teammate).** Judge step 3, a student requesting a badge, can't be done in the UI until it lands: the API is ready (`POST /badges/:id/requests`, `GET /badges/mine`; see `docs/api.md`) and the eligibility checklist already links to `/badges?request=<code>`. If it doesn't arrive, it's a small page to build.
+2. **Deploying, with your accounts:** follow `docs/deploy.md`.
+   - Generate **new** JWT secrets and OTP pepper, because the old ones leaked in early commits.
+   - Render's free plan blocks the usual SMTP ports, so use Brevo on port 2525.
+   - `render.yaml` deploys `main`, so merge `Aryan` first.
+   - Run `npm run seed`, then `npm run golden-path -- <api url>`, then `npm run seed` again.
+3. **A shared secret between Vercel and Render.** A client calling the Render URL directly can forge `X-Forwarded-For` to dodge the per-IP ceilings and use up the daily OTP-email cap. The fix is Vercel Routing Middleware adding a secret header that the server checks.
+4. **The demo admin's reach (decision).** The boot warning is in place. Keep the judged instance demo-only, or scope demo staff accounts to demo data.
+5. **After this plan:** `/admin/users` and `/admin/org-units` pages (the `GET /admin/users` API exists), `/profile`, email for booking events (B-18), a badge revoke action, then the cool-to-have features.
 
 **Deferred from Phase 1 (decisions needed):** the documented "never key a rate limit on IP" rule leaves two gaps. (a) Rotating email addresses gets unlimited register/OTP emails and bcrypt work. (b) About 60 scripted demo-login requests per role lock the judges out for 15 minutes. The proposed fix is a coarse per-IP ceiling stacked on the existing per-email and per-role limits, plus a global daily OTP-mail cap and `app.set('trust proxy', 1)` for Render.

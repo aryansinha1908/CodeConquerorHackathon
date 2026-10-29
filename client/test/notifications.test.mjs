@@ -566,6 +566,21 @@ test('AppLayout puts the bell in the header', async () => {
   assert.ok(header.indexOf('Notifications, 2 unread') < header.indexOf('aria-label="Logout"'), 'before Logout');
 });
 
+test("the bell's stand-in while its code loads: the same label and count, but nothing to tab to or press", async () => {
+  signIn(MEMBER);
+  const { BellFallback } = await load('/src/app/layouts/AppLayout.jsx');
+  const { notificationKeys } = await api();
+  const html = await render((React) => React.createElement(BellFallback), {
+    cache: [[notificationKeys.unreadCount, { data: { count: 2 } }]],
+  });
+  assert.match(html, /aria-label="Notifications, 2 unread"/);
+  assert.match(html, />2<\/span>/);
+  // Not a control: Enter on it would do nothing, and focus on it would drop to <body> when the
+  // real bell replaces it.
+  assert.doesNotMatch(html, /<(?:button|a|input|select|textarea)\b/);
+  assert.doesNotMatch(html, /tabindex=/i);
+});
+
 // ── The notifications page ────────────────────────────────────────────────────
 
 async function pageKey(params = {}) {

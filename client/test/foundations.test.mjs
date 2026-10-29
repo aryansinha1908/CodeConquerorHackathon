@@ -1340,6 +1340,11 @@ test('the booking and manage pages are built: each shows its loading state, neve
   }
   const placeholders = await load('/src/pages/Placeholders.jsx');
   assert.equal(placeholders.BookingsPlaceholder, undefined, 'the old bookings placeholder is gone');
+  // Every manage and admin route has its page now; /badges keeps its own until the teammate's
+  // badges page replaces it.
+  assert.equal(placeholders.ManagePlaceholder, undefined, 'the manage placeholder is gone');
+  assert.equal(placeholders.AdminPlaceholder, undefined, 'the admin placeholder is gone');
+  assert.equal(typeof placeholders.BadgesPlaceholder, 'function', '/badges still has its placeholder');
 });
 
 test('the router maps the booking and manage paths to their pages', async () => {
@@ -1367,7 +1372,7 @@ test('the router maps the booking and manage paths to their pages', async () => 
   try {
     const { router } = await load('/src/app/router.jsx');
     const pages = await load('/src/components/LazyPages.jsx');
-    const { matchRoutes } = await import('react-router-dom');
+    const { matchRoutes, Navigate } = await import('react-router-dom');
     const leaf = (path) => {
       const matches = matchRoutes(router.routes, path);
       assert.ok(matches, `${path} matches a route`);
@@ -1412,8 +1417,268 @@ test('the router maps the booking and manage paths to their pages', async () => 
     assert.equal(leaf('/incidents/new').element.type, pages.ReportIncidentPage);
     assert.equal(leaf('/admin/audit').element.type, pages.AuditPage);
     assert.equal(leaf('/notifications').element.type, pages.NotificationsPage);
+    // Phase 5: /badges is code-split like the other pages.
+    assert.equal(leaf('/badges').element.type, pages.BadgesPage);
+    // /admin has no page of its own, and an unbuilt or unknown console page goes to the section's
+    // first page: a redirect (replace, so Back doesn't bounce), never a placeholder.
+    const redirect = (path) => {
+      const matches = matchRoutes(router.routes, path);
+      const element = matches?.[matches.length - 1].route.element;
+      assert.equal(element?.type, Navigate, `${path} redirects`);
+      return element.props;
+    };
+    assert.deepEqual(redirect('/admin'), { to: '/admin/verifications', replace: true });
+    assert.deepEqual(redirect('/admin/users'), { to: '/admin/verifications', replace: true });
+    assert.deepEqual(redirect('/manage/nothing-here'), { to: '/manage', replace: true });
+    // One Suspense boundary per page route (a key each). React Router renders a navigation in a
+    // transition, and a transition keeps an already-shown boundary's old page on screen while the
+    // next page's chunk loads; a newly mounted boundary shows its fallback instead.
+    const boundaries = [];
+    const walk = (routes) => {
+      for (const route of routes) {
+        if (route.element?.type === pages.LazyPage) boundaries.push(route.element.key);
+        if (route.children) walk(route.children);
+      }
+    };
+    walk(router.routes);
+    assert.ok(boundaries.length >= 20, `${boundaries.length} page routes`);
+    assert.ok(boundaries.every((key) => key != null), 'every page boundary is keyed');
+    assert.equal(new Set(boundaries).size, boundaries.length, 'no two routes share a boundary');
   } finally {
     if (!had.window) delete globalThis.window;
     if (!had.document) delete globalThis.document;
   }
+});
+
+// ── Phase 5: layouts, guards and the resource page's manager links ────────────
+
+// The opening tags inside the first <nav aria-label="…"> of some markup.
+function navOf(html, label) {
+  const nav = html.match(new RegExp(`<nav aria-label="${label}"[^>]*>([\\s\\S]*?)</nav>`))?.[1];
+  assert.ok(nav, `a nav landmark labelled "${label}"`);
+  return nav;
+}
+
+const activeTab = (html) => html.match(/<a[^>]*aria-current="page"[^>]*>/g) ?? [];
+
+test('ManageLayout: Dashboard leads the sub-nav, active on /manage only; icons are hidden from screen readers', async () => {
+  const { ManageLayout } = await load('/src/app/layouts/ManageLayout.jsx');
+  const html = await render((React) => React.createElement(ManageLayout), { path: '/manage' });
+  const nav = navOf(html, 'Management');
+  assert.deepEqual(
+    [...nav.matchAll(/<a[^>]*href="([^"]+)"/g)].map((m) => m[1]),
+    ['/manage', '/manage/requests', '/manage/handovers', '/manage/resources', '/manage/badges', '/manage/incidents'],
+  );
+  assert.match(text(nav), /^Dashboard Review Queue/);
+  const [active, ...more] = activeTab(html);
+  assert.equal(more.length, 0, 'one active tab');
+  assert.match(active, /href="\/manage"/);
+  const tab = colours(active.match(/class="([^"]*)"/)[1]);
+  assert.ok(contrast(tab.bg, tab.fg) >= 4.5, `active tab: ${contrast(tab.bg, tab.fg).toFixed(2)}:1`);
+  const icons = nav.match(/<svg[^>]*>/g);
+  assert.equal(icons.length, 6);
+  for (const icon of icons) assert.match(icon, /aria-hidden="true"/);
+
+  // `end`: on a page under /manage, only that page's tab is active, not the dashboard's too.
+  const requests = await render((React) => React.createElement(ManageLayout), { path: '/manage/requests' });
+  assert.deepEqual(activeTab(requests).map((a) => a.match(/href="([^"]+)"/)[1]), ['/manage/requests']);
+});
+
+test('AdminLayout: the active tab and the eyebrow are at least 4.5:1, and no tab leads to an unbuilt page', async () => {
+  const { AdminLayout } = await load('/src/app/layouts/AdminLayout.jsx');
+  const html = await render((React) => React.createElement(AdminLayout), { path: '/admin/audit' });
+  const nav = navOf(html, 'Administration');
+  assert.deepEqual(
+    [...nav.matchAll(/<a[^>]*href="([^"]+)"/g)].map((m) => m[1]),
+    ['/admin/verifications', '/admin/audit', '/admin/incidents'],
+  );
+  const [active] = activeTab(html);
+  assert.match(active, /href="\/admin\/audit"/);
+  const tab = colours(active.match(/class="([^"]*)"/)[1]);
+  assert.ok(tab.bg && tab.fg, 'the active tab sets both colours');
+  assert.ok(contrast(tab.bg, tab.fg) >= 4.5, `active tab: ${contrast(tab.bg, tab.fg).toFixed(2)}:1`);
+  // The eyebrow sits on the header panel's #ede8df.
+  const panel = html.match(/<div class="([^"]*)">\s*<div><span[^>]*>INSTITUTE ADMINISTRATION/)?.[1];
+  assert.ok(panel, 'the eyebrow is in the header panel');
+  const eyebrow = colours(html.match(/<span class="([^"]*)"[^>]*>INSTITUTE ADMINISTRATION<\/span>/)[1]).fg;
+  const bg = colours(panel).bg;
+  assert.ok(contrast(bg, eyebrow) >= 4.5, `eyebrow: ${contrast(bg, eyebrow).toFixed(2)}:1`);
+  for (const icon of nav.match(/<svg[^>]*>/g)) assert.match(icon, /aria-hidden="true"/);
+});
+
+// A <button> inside an <a>: two nested controls for a screen reader.
+const BUTTON_IN_LINK = /<a\b[^>]*>(?:(?!<\/a>)[\s\S])*<button\b/;
+
+test('RequireVerified: the gate offers two links, never a button inside a link; a verified member gets the page', async () => {
+  const { RequireVerified } = await load('/src/features/auth/RequireVerified.jsx');
+  const guarded = (React) => React.createElement(RequireVerified, null, React.createElement('p', null, 'The booking form'));
+
+  signIn({ _id: 'user-aarav', roles: ['member'], verification: { status: 'unsubmitted' } });
+  const gate = await render(guarded);
+  assert.doesNotMatch(gate, BUTTON_IN_LINK);
+  assert.doesNotMatch(gate, /<button/, 'links only');
+  assert.match(gate, /<a[^>]*href="\/verification"[^>]*>Verify ID Card Now<svg[^>]*aria-hidden="true"/);
+  assert.match(gate, /<a[^>]*href="\/explore"[^>]*>Browse Resources<\/a>/);
+  assert.match(text(gate), /ID Card Verification Required/);
+  assert.doesNotMatch(text(gate), /The booking form/);
+
+  signIn({ _id: 'user-aarav', roles: ['member'], verification: { status: 'pending' } });
+  const pending = await render(guarded);
+  assert.match(pending, /<a[^>]*href="\/verification"[^>]*>Check Verification Status/);
+  assert.doesNotMatch(pending, BUTTON_IN_LINK);
+
+  signIn({ _id: 'user-aarav', roles: ['member'], verification: { status: 'approved' } });
+  assert.equal(await render(guarded), '<p>The booking form</p>');
+  signIn({ _id: 'mgr-1', roles: ['member', 'manager'], verification: { status: 'unsubmitted' } });
+  assert.equal(await render(guarded), '<p>The booking form</p>', 'managers are not gated');
+});
+
+test('RequireRole: the 403 card links back to Explore, never a button inside a link; the right role gets the page', async () => {
+  const { RequireRole } = await load('/src/features/auth/RequireRole.jsx');
+  const guarded = (React) =>
+    React.createElement(RequireRole, { roles: ['manager', 'admin'] }, React.createElement('p', null, 'The console'));
+
+  signIn({ _id: 'user-aarav', email: 'aarav@demo.campuscommons.test', roles: ['member'], verification: { status: 'approved' } });
+  const denied = await render(guarded, { path: '/manage/requests' });
+  assert.match(text(denied), /403 \/\/ ACCESS DENIED/);
+  assert.match(text(denied), /requires manager or admin authorization/);
+  assert.doesNotMatch(denied, BUTTON_IN_LINK);
+  assert.doesNotMatch(denied, /<button/, 'a link only');
+  assert.match(denied, /<a[^>]*href="\/explore"[^>]*><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>Return to Explore<\/a>/);
+  for (const icon of denied.match(/<svg[^>]*>/g)) assert.match(icon, /aria-hidden="true"/);
+
+  signIn({ _id: 'mgr-1', roles: ['member', 'manager'], verification: { status: 'approved' } });
+  assert.equal(await render(guarded), '<p>The console</p>');
+});
+
+test('a lazy page whose file is gone (an old tab after a redeploy) reloads the app once, then lets the error through', async () => {
+  const { reloadForStaleChunk, withStaleChunkReload, RELOAD_KEY, RELOAD_WINDOW_MS } = await load('/src/lib/staleChunk.js');
+  const memory = () => {
+    const saved = new Map();
+    return { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, String(value)) };
+  };
+  const storage = memory();
+  let reloads = 0;
+  const deps = (now, extra = {}) => () => ({ storage, reload: () => (reloads += 1), now, online: true, ...extra });
+  const gone = new TypeError('Failed to fetch dynamically imported module: https://example.test/assets/MyBookingsPage-old.js');
+  const failing = () => Promise.reject(gone);
+  const state = (promise) =>
+    Promise.race([
+      promise.then(() => 'resolved', () => 'rejected'),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 20)),
+    ]);
+
+  // The first failure reloads, and the import never settles: the page's fallback stays up until
+  // the reload replaces the page, instead of the error screen flashing first.
+  const T = 1_800_000_000_000;
+  assert.equal(await state(withStaleChunkReload(failing, deps(T))()), 'pending');
+  assert.equal(reloads, 1);
+  assert.equal(storage.getItem(RELOAD_KEY), String(T));
+  // Failing again just after that reload (an outage, a broken deploy): no loop, the error goes on.
+  await assert.rejects(withStaleChunkReload(failing, deps(T + 2_000))(), gone);
+  assert.equal(reloads, 1);
+  // A later redeploy, once the window has passed, reloads again.
+  assert.equal(await state(withStaleChunkReload(failing, deps(T + RELOAD_WINDOW_MS))()), 'pending');
+  assert.equal(reloads, 2);
+
+  // Never a reload it can't remember (storage blocked or missing), nor while offline.
+  const reload = () => assert.fail('no reload');
+  const blocked = { getItem: () => { throw new Error('SecurityError'); }, setItem: () => {} };
+  assert.equal(reloadForStaleChunk({ storage: blocked, reload, now: T }), false);
+  assert.equal(reloadForStaleChunk({ storage: null, reload, now: T }), false);
+  assert.equal(reloadForStaleChunk({ storage: memory(), reload, now: T, online: false }), false);
+
+  // A page that loads is passed through untouched.
+  const module = { default: () => null };
+  assert.equal(await withStaleChunkReload(() => Promise.resolve(module), deps(T))(), module);
+});
+
+// The Detail of GET /resources/:id (api.md "Resources"), trimmed to what the page reads.
+const resourceDetail = (overrides = {}) => ({
+  _id: '64c000000000000000000001',
+  title: 'FDM 3D Printer #2',
+  slug: 'fdm-3d-printer-2',
+  images: [],
+  category: 'equipment',
+  bookingMode: 'slot',
+  quantity: 1,
+  riskLevel: 'medium',
+  status: 'active',
+  availability: { weekly: [{ day: 1, open: '09:00', close: '17:00' }], slotMinutes: 30, blackouts: [] },
+  eligibility: { memberTypes: [], departments: [], badges: [], approvalMode: 'manual' },
+  limits: { maxDurationMins: 240, maxHoursPerWeek: 6 },
+  orgUnit: { _id: 'u-dic', name: 'Design and Innovation Centre', code: 'dic', type: 'centre' },
+  openHours: 'Mon 09:00–17:00',
+  usageRules: 'PLA and PETG only.',
+  checklist: ['Nozzle clean'],
+  canManage: false,
+  createdAt: '2026-10-20T04:30:00.000Z',
+  updatedAt: '2026-10-20T04:30:00.000Z',
+  ...overrides,
+});
+
+// The whole <a …>…</a> whose text includes `label`, or null.
+const linkWith = (html, label) =>
+  html.match(new RegExp(`<a\\b[^>]*>(?:(?!</a>)[\\s\\S])*${label}(?:(?!</a>)[\\s\\S])*</a>`))?.[0] ?? null;
+
+test('ResourceDetail: whoever manages the resource can edit it or report an issue on it; others see neither', async () => {
+  signIn({ _id: 'mgr-1', roles: ['member', 'manager'], verification: { status: 'approved' } });
+  const { ResourceDetail } = await load('/src/pages/ResourceDetailPage.jsx');
+  const show = (resource) =>
+    render((React) => React.createElement(ResourceDetail, { resource }), { path: `/resources/${resource._id}` });
+
+  const managed = await show(resourceDetail({ canManage: true }));
+  const edit = linkWith(managed, 'Edit this resource');
+  assert.match(edit, /href="\/manage\/resources\/64c000000000000000000001\/edit"/);
+  const report = linkWith(managed, 'Report an issue');
+  assert.match(report, /href="\/incidents\/new\?resourceId=64c000000000000000000001"/);
+  for (const link of [edit, report]) {
+    assert.match(link, /<svg[^>]*aria-hidden="true"/);
+    assert.doesNotMatch(link, /<button/);
+  }
+  assert.match(text(managed), /You manage this/);
+
+  // A manager of another unit (canManage false) may neither edit it nor report on it without a booking.
+  const other = await show(resourceDetail({ canManage: false }));
+  assert.equal(linkWith(other, 'Edit this resource'), null);
+  assert.equal(linkWith(other, 'Report an issue'), null);
+  assert.doesNotMatch(other, /href="\/manage\/resources\//);
+});
+
+test('vite.config.js: each vendor goes to its own chunk group; app code and lazy-only libraries to none', async () => {
+  const { default: config } = await import('../vite.config.js');
+  const groups = config.build.rolldownOptions.output.codeSplitting.groups;
+  // The group that claims a module: the highest priority whose test matches, then the earliest.
+  const groupOf = (id) =>
+    groups
+      .map((group, index) => ({ ...group, index }))
+      .filter((group) => group.test.test(id))
+      .sort((a, b) => b.priority - a.priority || a.index - b.index)[0] ?? null;
+  const cases = [
+    ['/app/node_modules/react/index.js', 'react'],
+    ['/app/node_modules/react-dom/cjs/react-dom-client.production.js', 'react'],
+    ['/app/node_modules/scheduler/index.js', 'react'],
+    ['/app/node_modules/react-router/dist/production/index.mjs', 'react'],
+    ['/app/node_modules/react-router-dom/dist/index.mjs', 'react'],
+    ['C:\\app\\node_modules\\react-dom\\client.js', 'react'],
+    ['/app/node_modules/@tanstack/query-core/build/modern/index.js', 'query'],
+    ['/app/node_modules/@tanstack/react-query/build/modern/index.js', 'query'],
+    ['/app/node_modules/@headlessui/react/dist/headlessui.esm.js', 'headlessui'],
+    ['/app/node_modules/date-fns/format.js', 'date-fns'],
+    ['/app/node_modules/date-fns-tz/dist/esm/index.js', 'date-fns'],
+    ['/app/node_modules/lucide-react/dist/esm/icons/bell.js', 'icons'],
+    ['/app/node_modules/zod/v4/classic/schemas.js', 'forms'],
+    ['/app/node_modules/react-hook-form/dist/index.esm.mjs', 'forms'],
+    ['/app/node_modules/@hookform/resolvers/zod/dist/zod.mjs', 'forms'],
+    // Not React: packages whose names only start with "react".
+    ['/app/node_modules/@react-aria/focus/dist/import.mjs', 'vendor'],
+    ['/app/node_modules/react-hook-form-extra/index.js', 'vendor'],
+    ['/app/node_modules/axios/lib/axios.js', 'vendor'],
+    ['/app/node_modules/sonner/dist/index.mjs', 'vendor'],
+    ['/app/src/pages/ExplorePage.jsx', null],
+  ];
+  for (const [id, name] of cases) assert.equal(groupOf(id)?.name ?? null, name, id);
+  // The catch-all takes only what the entry loads statically, so a library that only a lazy page
+  // imports (browser-image-compression) stays with that page.
+  assert.deepEqual(groupOf('/app/node_modules/browser-image-compression/dist/index.mjs').tags, ['$initial']);
 });

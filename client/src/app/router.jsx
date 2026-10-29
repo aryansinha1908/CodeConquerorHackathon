@@ -18,6 +18,7 @@ import VerifyOtpPage from '../features/auth/VerifyOtpPage';
 import {
   AuditPage,
   BadgeRequestsPage,
+  BadgesPage,
   BookingDetailPage,
   DashboardPage,
   ExplorePage,
@@ -37,10 +38,14 @@ import {
   VerificationPage,
   VerificationQueuePage,
 } from '../components/LazyPages';
-import { AdminPlaceholder, BadgesPlaceholder, ManagePlaceholder } from '../pages/Placeholders';
 
-// A lazy page inside the shared loading fallback.
-const page = (element) => <LazyPage>{element}</LazyPage>;
+// A lazy page inside the shared loading fallback, with a boundary of its own (a key per route).
+// React Router renders each navigation in a transition, and a transition keeps an already-shown
+// boundary's old page up while the next page's chunk loads: between sibling routes sharing one
+// boundary, the click would look ignored, the old tab still current. A newly mounted boundary
+// shows its fallback. The same route with other params (/resources/a → b) keeps its boundary.
+let pageKey = 0;
+const page = (element) => <LazyPage key={`page-${++pageKey}`}>{element}</LazyPage>;
 
 export const router = createBrowserRouter([
   // ── Public auth routes ──────────────────────────────────────────────────────
@@ -97,7 +102,7 @@ export const router = createBrowserRouter([
         element: page(<HandoverPage key="check_out" phase="check_out" />),
       },
 
-      { path: '/badges', element: page(<BadgesPlaceholder />) },
+      { path: '/badges', element: page(<BadgesPage />) },
 
       // ── Incidents (frontend.md §6.2) and notifications ───────────────────
       { path: '/incidents/new', element: page(<ReportIncidentPage />) },
@@ -123,10 +128,8 @@ export const router = createBrowserRouter([
           { path: 'incidents', element: page(<IncidentListPage key="manage" scope="manage" />) },
           { path: 'incidents/:id', element: page(<IncidentDetailPage />) },
           { path: 'badges', element: page(<BadgeRequestsPage />) },
-          {
-            path: '*',
-            element: <ManagePlaceholder />,
-          },
+          // An unknown page of the console: its dashboard.
+          { path: '*', element: <Navigate to="/manage" replace /> },
         ],
       },
 
@@ -138,19 +141,15 @@ export const router = createBrowserRouter([
             <AdminLayout />
           </RequireRole>
         ),
+        // No admin dashboard: /admin, and any page of the console that isn't built (frontend.md
+        // §6.4's /admin/users and /admin/org-units), open the verification queue.
         children: [
-          {
-            index: true,
-            element: <AdminPlaceholder />,
-          },
+          { index: true, element: <Navigate to="/admin/verifications" replace /> },
           { path: 'verifications', element: page(<VerificationQueuePage />) },
           { path: 'audit', element: page(<AuditPage />) },
           { path: 'incidents', element: page(<IncidentListPage key="admin" scope="admin" />) },
           { path: 'incidents/:id', element: page(<IncidentDetailPage />) },
-          {
-            path: '*',
-            element: <AdminPlaceholder />,
-          },
+          { path: '*', element: <Navigate to="/admin/verifications" replace /> },
         ],
       },
     ],

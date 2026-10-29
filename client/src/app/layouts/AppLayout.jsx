@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { logout as apiLogout } from '../../features/auth/api';
 import { queryClient } from '../queryClient';
 import { toast } from 'sonner';
 import {
+  Bell,
   Compass,
   IdCard,
   CalendarCheck,
@@ -17,7 +18,40 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
-import { NotificationBell } from '../../components/NotificationBell';
+import { NotificationBell } from '../../components/LazyPages';
+import {
+  bellLabel,
+  unreadBadgeText,
+  unreadCountOf,
+  useUnreadCount,
+} from '../../features/notifications/api';
+
+/**
+ * The bell while its code loads (components/LazyPages.jsx): the same look, label and badge as
+ * NotificationBell's menu button, but not a control, so there is nothing to tab to or press that
+ * does nothing, and no focus to lose to <body> when the real button replaces it. It only reads the
+ * cached count (enabled: false); the real bell fetches and polls it, so there is no second request.
+ */
+export function BellFallback() {
+  const unread = unreadCountOf(useUnreadCount({ enabled: false }).data) ?? 0;
+  return (
+    <span
+      role="img"
+      aria-label={bellLabel(unread)}
+      className="relative inline-block p-2 rounded-lg border-2 border-[#1a1a1a] bg-white text-[#1a1a1a] shadow-[2px_2px_0_#1a1a1a]"
+    >
+      <Bell className="w-4 h-4" aria-hidden="true" />
+      {unread > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full border-2 border-[#1a1a1a] bg-[#c0392b] text-white text-[10px] font-black leading-none flex items-center justify-center"
+        >
+          {unreadBadgeText(unread)}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export function AppLayout() {
   const navigate = useNavigate();
@@ -155,7 +189,9 @@ export function AppLayout() {
             </div>
 
             {/* frontend.md §7: the unread count and the latest 5, on every page of the app shell. */}
-            <NotificationBell />
+            <Suspense fallback={<BellFallback />}>
+              <NotificationBell />
+            </Suspense>
 
             <button
               onClick={handleLogout}

@@ -1,8 +1,15 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy as reactLazy, Suspense } from 'react';
+import { withStaleChunkReload } from '../lib/staleChunk';
 
 // The code-split pages of app/router.jsx. They live here, in a file that exports only components,
 // so the router module (which exports the router object) stays fast-refresh friendly. Add a page:
-// one lazy() line here, then a route with `element: <LazyPage><NewPage /></LazyPage>`.
+// one lazy() line here, then a route with `element: page(<NewPage />)`. Only the
+// auth pages and the layouts load with the app (the layouts are small, and a lazy layout would
+// make each page under it wait for the layout's file before asking for its own).
+
+// React.lazy that, in a build, reloads the app once when a chunk is gone after a redeploy
+// (lib/staleChunk.js). Not in dev, where a failed import is a code error to see as it is.
+const lazy = (load) => reactLazy(import.meta.env.PROD ? withStaleChunkReload(load) : load);
 
 export const ExplorePage = lazy(() => import('../pages/ExplorePage'));
 export const ResourceDetailPage = lazy(() => import('../pages/ResourceDetailPage'));
@@ -23,6 +30,17 @@ export const IncidentDetailPage = lazy(() => import('../features/incidents/Incid
 export const IncidentListPage = lazy(() => import('../features/incidents/IncidentListPage'));
 export const AuditPage = lazy(() => import('../features/admin/AuditPage'));
 export const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
+// /badges is the teammate's: their page replaces this line's import when it lands.
+export const BadgesPage = lazy(() =>
+  import('../pages/Placeholders').then((module) => ({ default: module.BadgesPlaceholder }))
+);
+
+// Not a page: the header bell. Its menu is Headless UI's, which nothing else on the first screen
+// needs, so the login page never downloads it and a signed-in page fetches it alongside its own
+// chunk. AppLayout shows a look-alike button (BellFallback) while it loads.
+export const NotificationBell = lazy(() =>
+  import('./NotificationBell').then((module) => ({ default: module.NotificationBell }))
+);
 
 export function PageFallback() {
   return (

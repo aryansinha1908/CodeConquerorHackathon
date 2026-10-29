@@ -885,6 +885,23 @@ test('without a booking: a member is sent to the booking; a manager picks one of
   assert.match(html, /href="\/manage\/incidents"/, 'back to the console list');
 });
 
+test('from a resource page (?resourceId=), Back and Cancel return to that resource, not the incident list', async () => {
+  const { incidentKeys } = await api();
+  const reportable = [incidentKeys.reportable({ q: '', limit: 20 }), { data: [card()], meta: { page: 1, limit: 20, total: 1 } }];
+  const html = await renderReport(`/incidents/new?resourceId=${RESOURCE}`, {
+    user: MANAGER,
+    cache: [[['resource', RESOURCE], { data: card() }], reportable],
+  });
+  const back = html.match(/<a[^>]*href="([^"]*)"[^>]*><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>([^<]*)<\/a>/);
+  assert.deepEqual([back?.[1], back?.[2]], [`/resources/${RESOURCE}`, 'Back to the resource']);
+  assert.match(html, new RegExp(`<a[^>]*href="/resources/${RESOURCE}"[^>]*>Cancel</a>`));
+  assert.doesNotMatch(html, /href="\/manage\/incidents"/);
+
+  // Without a resource in the link (the console's "Report an issue"), the list stays the way back.
+  const plain = await renderReport('/incidents/new', { user: MANAGER, cache: [reportable] });
+  assert.match(plain, /href="\/manage\/incidents"[^>]*><svg[\s\S]*?<\/svg>Back to incidents<\/a>/);
+});
+
 // ── auditApi.js ───────────────────────────────────────────────────────────────
 
 test('audit URL: filters read as given, checked with the server\'s messages, and the page reset on change', async () => {

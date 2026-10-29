@@ -8,8 +8,10 @@ export const keys = {
   otpTries: (email) => `otp:tries:${normaliseEmail(email)}`,
   // One key per session (a refresh-token family); the value is the family's current jti.
   refreshFamily: (userId, familyId) => `auth:refresh:${userId}:${familyId}`,
-  // Prefix for the rate-limit store; it appends the user id or email itself.
+  // Prefix for the rate-limit store; it appends the user id, email, role or IP itself.
   rateLimitPrefix: (tier) => `rl:${tier}:`,
+  // The global OTP email cap (middleware/rateLimit.js): a sorted set of send times, 24-hour window.
+  otpEmailLog: "rl:otpEmail:global",
   resourceLock: (resourceId) => `lock:resource:${resourceId}`,
   sweepLock: "lock:cron:sweep",
   cacheVersion: (namespace) => `cache:${namespace}:ver`,

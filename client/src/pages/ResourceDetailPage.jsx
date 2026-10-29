@@ -10,11 +10,14 @@ import {
   Clock,
   Layers,
   MapPin,
+  Pencil,
   ScrollText,
   SearchX,
+  TriangleAlert,
   Users,
 } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
+import { LinkButton } from '../features/manage/components/Bits';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Skeleton } from '../components/ui/Skeleton';
 import { formatIstRange, istDateKey } from '../lib/time';
@@ -107,6 +110,27 @@ function Fact({ icon: Icon, label, children }) {
   );
 }
 
+/**
+ * For whoever manages the resource (canManage: a manager of its unit, or an admin): edit the
+ * listing, or report an issue that isn't tied to a booking, which only they may do (api.md
+ * POST /incidents). The report page pre-selects the resource from ?resourceId=.
+ */
+function ManagerActions({ resource }) {
+  const id = encodeURIComponent(String(resource._id));
+  return (
+    <div className="flex flex-wrap gap-3 pt-4 border-t-2 border-[#1a1a1a]/15">
+      <LinkButton to={`/manage/resources/${id}/edit`}>
+        <Pencil className="w-4 h-4" aria-hidden="true" />
+        Edit this resource
+      </LinkButton>
+      <LinkButton to={`/incidents/new?resourceId=${id}`}>
+        <TriangleAlert className="w-4 h-4" aria-hidden="true" />
+        Report an issue
+      </LinkButton>
+    </div>
+  );
+}
+
 function Header({ resource }) {
   const risk = riskView(resource.riskLevel);
   const status = resourceStatusView(resource.status);
@@ -161,6 +185,7 @@ function Header({ resource }) {
         <ArrowDown className="w-4 h-4" aria-hidden="true" />
         Check availability and book
       </a>
+      {resource.canManage && resource._id && <ManagerActions resource={resource} />}
     </div>
   );
 }

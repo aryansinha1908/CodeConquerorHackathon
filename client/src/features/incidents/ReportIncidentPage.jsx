@@ -354,11 +354,15 @@ export default function ReportIncidentPage() {
   const bookingId = searchParams.get('bookingId') || null;
   const resourceId = searchParams.get('resourceId') || null;
   const staff = canReportWithoutBooking(user);
+  // ?resourceId= comes from the resource's own page ("Report an issue"), so Back and Cancel go
+  // there rather than to the incident list.
   const back = bookingId
     ? { to: `/bookings/${encodeURIComponent(bookingId)}`, label: 'Back to the booking' }
-    : staff
-      ? { to: user?.roles?.includes('manager') ? '/manage/incidents' : '/admin/incidents', label: 'Back to incidents' }
-      : { to: '/bookings', label: 'My bookings' };
+    : staff && isId(resourceId)
+      ? { to: `/resources/${encodeURIComponent(resourceId)}`, label: 'Back to the resource' }
+      : staff
+        ? { to: user?.roles?.includes('manager') ? '/manage/incidents' : '/admin/incidents', label: 'Back to incidents' }
+        : { to: '/bookings', label: 'My bookings' };
 
   return (
     <div className="space-y-6 font-mono text-[#1a1a1a] max-w-3xl">

@@ -10,6 +10,7 @@ import { useMailTransport } from "../../src/config/mailer.js";
 import { useRedisClient } from "../../src/config/redis.js";
 import logger from "../../src/lib/logger.js";
 import { TTL, keys } from "../../src/lib/redisKeys.js";
+import { OTP_EMAIL_CAP } from "../../src/middleware/rateLimit.js";
 import { User } from "../../src/models/index.js";
 import { redis, skip, useTestDatabase } from "../integration/fixtures.js";
 
@@ -32,9 +33,11 @@ let origin;
 // refresh cookie is passed by hand, so tests can replay old ones.
 let signupProof = null;
 
-// → { status, body, cookie (the refreshToken Set-Cookie line, if any), headers }.
-async function call(method, path, { body, cookie, token } = {}) {
+// → { status, body, cookie (the refreshToken Set-Cookie line, if any), headers }. `from` plays a client
+// at that address behind Render's proxy (X-Forwarded-For); otherwise every request comes from 127.0.0.1.
+async function call(method, path, { body, cookie, token, from } = {}) {
   const headers = {};
+  if (from) headers["x-forwarded-for"] = from;
   if (body !== undefined) headers["content-type"] = "application/json";
   const cookies = [
     cookie && `refreshToken=${cookie}`,
@@ -81,6 +84,15 @@ function assertEnvelopeError(res, status, code) {
   assert.equal(res.body.success, false);
   assert.equal(res.body.error.code, code);
   assert.ok(res.body.requestId);
+}
+
+// Today's code emails, all used up: sent in the last hour, so a slot frees in 23 hours.
+async function useUpCodeEmails() {
+  const at = Date.now() - 60 * 60_000;
+  const members = [];
+  for (let i = 0; i < OTP_EMAIL_CAP.limit; i++)
+    members.push(at + i, `sent-${i}`);
+  await redis.zadd(keys.otpEmailLog, ...members);
 }
 
 const redisDown = () =>
@@ -526,6 +538,178 @@ describe("/api/v1/auth", { skip }, () => {
       429,
       "RATE_LIMITED",
     );
+  });
+
+  test("sign-ups from one network stop at the IP ceiling (100 an hour), whichever emails they use", async () => {
+    await redis.set("rl:registerIp:127.0.0.1", 100, "PX", 60_000);
+    const limited = await post("/register", {
+      name: "Ananya Rao",
+      email: EMAIL,
+      password: PASSWORD,
+    });
+    assertEnvelopeError(limited, 429, "RATE_LIMITED");
+    assert.equal(limited.body.error.details.tier, "registerIp");
+    assert.equal(await User.countDocuments({ email: EMAIL }), 0);
+    // A student on another network signs up as usual.
+    const elsewhere = await post(
+      "/register",
+      { name: "Ananya Rao", email: EMAIL, password: PASSWORD },
+      { from: "198.51.100.20" },
+    );
+    assert.equal(elsewhere.status, 201);
+  });
+
+  test("failed logins from one network stop at the IP ceiling; the right password from elsewhere still works", async () => {
+    await account();
+    await redis.set("rl:loginIp:127.0.0.1", 100, "PX", 60_000);
+    const limited = await post("/login", { email: EMAIL, password: PASSWORD });
+    assertEnvelopeError(limited, 429, "RATE_LIMITED");
+    assert.equal(limited.body.error.details.tier, "loginIp");
+    const elsewhere = await post(
+      "/login",
+      { email: EMAIL, password: PASSWORD },
+      { from: "198.51.100.20" },
+    );
+    assert.equal(elsewhere.status, 200);
+  });
+
+  // One address used to fill the whole day's cap in about 20 seconds: 63 made-up campus sign-ups,
+  // then 3 resends each. Now each network gets a share, and everyone else keeps signing up.
+  test("each network gets a share of the day's code emails: register, resend-otp and an unverified login all count", async () => {
+    const share = "rl:otpSendIp:127.0.0.1";
+    await post("/register", {
+      name: "Meera Iyer",
+      email: "meera.iyer@nitjsr.ac.in",
+      password: PASSWORD,
+    });
+    await post("/resend-otp", { email: "nobody@nitjsr.ac.in" });
+    await redis.expire(keys.otp("meera.iyer@nitjsr.ac.in"), TTL.otpSeconds - 61);
+    assertEnvelopeError(
+      await post("/login", {
+        email: "meera.iyer@nitjsr.ac.in",
+        password: PASSWORD,
+      }),
+      403,
+      "EMAIL_NOT_VERIFIED",
+    );
+    assert.equal(Number(await redis.get(share)), 3);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(mails.length, 2, "the sign-up's code and the login's");
+
+    // This network's 50 are used up.
+    await redis.incrby(share, 47);
+    mails.length = 0;
+    const refused = await post("/register", {
+      name: "Ananya Rao",
+      email: EMAIL,
+      password: PASSWORD,
+    });
+    assertEnvelopeError(refused, 429, "RATE_LIMITED");
+    assert.equal(refused.body.error.details.tier, "otpSendIp");
+    assert.equal(
+      refused.body.error.message,
+      "Too many verification codes asked for from your network today. Try again in 1 day.",
+    );
+    assert.equal(await User.countDocuments({ email: EMAIL }), 0);
+    const resend = await post("/resend-otp", { email: "meera.iyer@nitjsr.ac.in" });
+    assertEnvelopeError(resend, 429, "RATE_LIMITED");
+    assert.equal(resend.body.error.details.tier, "otpSendIp");
+    await redis.expire(keys.otp("meera.iyer@nitjsr.ac.in"), TTL.otpSeconds - 61);
+    const login = await post("/login", {
+      email: "meera.iyer@nitjsr.ac.in",
+      password: PASSWORD,
+    });
+    assertEnvelopeError(login, 403, "EMAIL_NOT_VERIFIED");
+    assert.match(login.body.error.message, /ask for a new one later/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(mails.length, 0);
+    assert.equal(
+      await redis.zcard(keys.otpEmailLog),
+      2,
+      "nothing refused took a slot of the global cap",
+    );
+
+    // A student on another network signs up as usual.
+    const elsewhere = await post(
+      "/register",
+      { name: "Ananya Rao", email: EMAIL, password: PASSWORD },
+      { from: "198.51.100.20" },
+    );
+    assert.equal(elsewhere.status, 201);
+  });
+
+  test("once today's code emails are used up, register and resend-otp are 503 and send nothing", async () => {
+    await post("/register", {
+      name: "Meera Iyer",
+      email: "meera.iyer@nitjsr.ac.in",
+      password: PASSWORD,
+    });
+    mails.length = 0;
+    await useUpCodeEmails();
+
+    const refused = await post("/register", {
+      name: "Ananya Rao",
+      email: EMAIL,
+      password: PASSWORD,
+    });
+    assertEnvelopeError(refused, 503, "SERVICE_UNAVAILABLE");
+    assert.equal(
+      refused.body.error.message,
+      "We've reached today's limit for emailing codes, so no code was sent. Try again in 23 hours.",
+    );
+    assert.ok(refused.body.error.details.retryAfterSeconds > 22 * 3600);
+    assert.equal(
+      refused.headers.get("retry-after"),
+      String(refused.body.error.details.retryAfterSeconds),
+    );
+    assert.equal(refused.proofCookie, undefined);
+    assert.equal(await User.countDocuments({ email: EMAIL }), 0);
+
+    // The same 503 for every address, so it says nothing about which have accounts.
+    for (const email of ["meera.iyer@nitjsr.ac.in", "nobody@nitjsr.ac.in"])
+      assertEnvelopeError(
+        await post("/resend-otp", { email }),
+        503,
+        "SERVICE_UNAVAILABLE",
+      );
+    // Login still answers, without a code.
+    await redis.expire(
+      keys.otp("meera.iyer@nitjsr.ac.in"),
+      TTL.otpSeconds - 61,
+    );
+    const login = await post("/login", {
+      email: "meera.iyer@nitjsr.ac.in",
+      password: PASSWORD,
+    });
+    assertEnvelopeError(login, 403, "EMAIL_NOT_VERIFIED");
+    assert.match(login.body.error.message, /ask for a new one later/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(mails.length, 0);
+  });
+
+  test("demo-login: one network using up a role leaves it open elsewhere, under a role-wide ceiling", async () => {
+    process.env.DEMO_MODE = "true";
+    await redis.set("rl:demoIp:student:127.0.0.1", 60, "PX", 60_000);
+    const limited = await post("/demo-login", { role: "student" });
+    assertEnvelopeError(limited, 429, "RATE_LIMITED");
+    assert.equal(limited.body.error.details.tier, "demoIp");
+    // Another role from the same network, and the same role from another network, still sign in.
+    assert.equal((await post("/demo-login", { role: "admin" })).status, 200);
+    const judge = await post(
+      "/demo-login",
+      { role: "student" },
+      { from: "198.51.100.20" },
+    );
+    assert.equal(judge.status, 200);
+    // Every network together: 1000 sign-ins per role in 15 minutes.
+    await redis.set("rl:demo:student", 1000, "PX", 60_000);
+    const everyone = await post(
+      "/demo-login",
+      { role: "student" },
+      { from: "192.0.2.5" },
+    );
+    assertEnvelopeError(everyone, 429, "RATE_LIMITED");
+    assert.equal(everyone.body.error.details.tier, "demo");
   });
 
   test("demo-config and demo-login follow DEMO_MODE", async () => {

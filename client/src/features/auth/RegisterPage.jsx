@@ -83,7 +83,7 @@ export default function RegisterPage() {
         const wait = err.retryAfter ?? 60;
         setRetryIn(wait);
         toast.error(err.message || 'Too many sign-up attempts.', {
-          description: `Try again in ${formatCountdown(wait)}.`,
+          description: `Try again in ${formatCountdown(wait)}.${err.requestId ? ` (ref ${err.requestId})` : ''}`,
         });
       } else {
         toast.error(err.message ?? 'Something went wrong', {

@@ -18,7 +18,12 @@ import bcrypt from "bcryptjs";
 import { sendMail } from "../config/mailer.js";
 import { log } from "../lib/log.js";
 import { ServiceError } from "../lib/serviceError.js";
-import { takeOtpSend } from "../middleware/rateLimit.js";
+import { formatDuration } from "../lib/time.js";
+import {
+  otpEmailsLeft,
+  takeOtpEmail,
+  takeOtpSend,
+} from "../middleware/rateLimit.js";
 import { User } from "../models/index.js";
 import { record } from "./auditService.js";
 import {
@@ -331,8 +336,37 @@ function emailCode(user, code) {
   );
 }
 
+// The caller has taken a slot of the global cap on code emails first (takeOtpEmail).
 async function sendCode(user) {
   emailCode(user, await issueOtp(user.email));
+}
+
+// 503 once the global cap on code emails (middleware/rateLimit.js, architecture.md §11) is used up:
+// register and resend-otp say so and send nothing. The wait is until the oldest send in the window
+// drops out.
+function codeEmailsUsedUp(retryAfterSeconds) {
+  const wait = formatDuration(Math.ceil(retryAfterSeconds / 60));
+  const err = new ServiceError(
+    503,
+    "SERVICE_UNAVAILABLE",
+    `We've reached today's limit for emailing codes, so no code was sent. Try again in ${wait}.`,
+    { retryAfterSeconds },
+  );
+  err.headers = { "Retry-After": String(retryAfterSeconds) };
+  return err;
+}
+
+// resend-otp's code, after the answer. The slot is taken only now, so if the cap ran out in between
+// nothing is sent, and that is logged.
+async function resendCode(user) {
+  if (!(await takeOtpEmail()).allowed) {
+    log.warn(
+      { userId: String(user._id) },
+      "The OTP email cap ran out before a resent code went out",
+    );
+    return;
+  }
+  await sendCode(user);
 }
 
 // ── Flows ──────────────────────────────────────────────────────────────────
@@ -353,6 +387,9 @@ export async function register(input, { requestId } = {}) {
   await assertCodeStoreUp(email);
   const existing = await User.findOne({ email }).select("emailVerified").lean();
   if (existing?.emailVerified) throw emailTaken();
+  // The same once the global cap on code emails is used up: nothing is created or changed.
+  const slot = await takeOtpEmail();
+  if (!slot.allowed) throw codeEmailsUsedUp(slot.retryAfterSeconds);
 
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
   const hints = emailHints(email) ?? undefined;
@@ -429,15 +466,18 @@ export async function verifyOtp(input, { signupProof: proof } = {}) {
 
 // POST /auth/resend-otp → { sent: true, retryAfter } for every address. Only an existing, unverified
 // account actually gets a code, issued after the answer like the email itself: waiting on Redis for
-// those accounts only would let the response time single them out.
+// those accounts only would let the response time single them out. A used-up cap on code emails is
+// a 503 for every address, for the same reason.
 export async function resendOtp(input) {
   const { email } = readEmailInput(input);
   await assertCodeStoreUp(email);
+  const cap = await otpEmailsLeft();
+  if (!cap.allowed) throw codeEmailsUsedUp(cap.retryAfterSeconds);
   const user = await User.findOne({ email })
     .select("name email emailVerified")
     .lean();
   if (user && !user.emailVerified)
-    sendCode(user).catch((err) =>
+    resendCode(user).catch((err) =>
       log.error({ err, userId: String(user._id) }, "Couldn't resend an OTP"),
     );
   return { sent: true, retryAfter: OTP_RETRY_AFTER_SECONDS };
@@ -465,9 +505,11 @@ async function passwordMatches(password, hash, userId) {
 
 // POST /auth/login → a session. An unverified email is 403 EMAIL_NOT_VERIFIED with a fresh code, unless
 // one went out in the last minute (that code still works, and replacing it would break the email the
-// user is reading) or resend-otp's limits for the address are used up: this path counts against them
-// (takeOtpSend), since the login tier doesn't count this 403 and registering needs no inbox.
-export async function login(input) {
+// user is reading), resend-otp's limits for the address or for the caller's network (`network`, the
+// route's ipKey) are used up (this path counts against them, takeOtpSend, since the login tier
+// doesn't count this 403 and registering needs no inbox), or the global cap on code emails is. The
+// narrower limits are checked first, so a code they refuse doesn't use up a slot everyone shares.
+export async function login(input, { network } = {}) {
   const { email, password } = readLoginInput(input);
   const user = await loadUser({ email }, { withPassword: true });
   // A password over 72 bytes can't be right (register refuses it), and bcrypt would only read 72.
@@ -483,7 +525,8 @@ export async function login(input) {
     let message =
       "Verify your email first. We've sent a 6-digit code to your inbox.";
     if (!(await sentWithin(email, OTP_RETRY_AFTER_SECONDS))) {
-      if (await takeOtpSend(email)) await sendCode(user);
+      if ((await takeOtpSend(email, network)) && (await takeOtpEmail()).allowed)
+        await sendCode(user);
       else
         message =
           "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later.";
