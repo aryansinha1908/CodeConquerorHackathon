@@ -9,6 +9,7 @@ import { blockSuspended } from "../middleware/blockSuspended.js";
 import {
   bookingCreateLimiter,
   generalLimiter,
+  visitorKey,
 } from "../middleware/rateLimit.js";
 import { sendData, sendList } from "../lib/respond.js";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../services/bookingService.js";
 import { assertValid } from "../services/params.js";
 import { issuePass, passStatus, scanPass } from "../services/passService.js";
+import { compareHandoverPhotos } from "../services/photoCompareService.js";
 import { photoProblems } from "../services/uploadService.js";
 
 const router = express.Router();
@@ -84,6 +86,14 @@ router.post("/:id/pass", verifyAuth, generalLimiter, async (req, res) => {
 // → { phase, verifiedAt }: whether the unit has verified the pass, for the open card to poll cheaply.
 router.get("/:id/pass", verifyAuth, generalLimiter, async (req, res) => {
   sendData(req, res, await passStatus(req.params.id, req.user.id));
+});
+
+// AI photo comparison (C-15), for the unit's managers and admins once the item is checked out: the
+// pickup and return photos → { comparison: { summary, newDamageLikely, differences }, generatedAt,
+// photos, quota, cached }. A suggestion only. 409 without photos at both handovers; 429
+// AI_QUOTA_EXCEEDED and 503 AI_UNAVAILABLE as for AI search.
+router.post("/:id/ai-compare", verifyAuth, generalLimiter, blockSuspended, async (req, res) => {
+  sendData(req, res, await compareHandoverPhotos(req.params.id, req.user.id, { network: visitorKey(req) }));
 });
 
 // ── Lists (static paths before /:id) ──────────────────────────────────────

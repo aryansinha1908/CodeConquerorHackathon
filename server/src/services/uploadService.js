@@ -298,10 +298,16 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // backslash can make a browser resolve it to another account's asset. No query, fragment, user or
 // port, and nothing but the version before the public id: a transformation could overlay or fetch an
 // image from elsewhere.
+// The public id itself must look like one storeFiles() made (folder/uuid): letters, digits and
+// hyphens between slashes. Cloudinary reads a leading segment such as "w_8", "l_fetch:…" or
+// "if_w_lte_768" as a transformation, which would change the image (an overlay, a remote fetch) for
+// everyone who looks at it, and for the AI photo comparison.
+const PUBLIC_ID = /^[A-Za-z0-9-]+(?:\/[A-Za-z0-9-]+)*$/;
+
 function isOurPhoto(photo, cloud) {
   if (typeof photo?.url !== "string" || typeof photo?.publicId !== "string")
     return false;
-  if (!photo.publicId) return false;
+  if (!PUBLIC_ID.test(photo.publicId)) return false;
   let url;
   try {
     url = new URL(photo.url);

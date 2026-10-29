@@ -41,20 +41,26 @@ if poolLimit >= 0 then
 end
 return {1, "OK", used, poolUsed}`;
 
-// Gives the user's daily request back, and the pool's when there is one (ARGV[1] = "1"). Global
-// counters stay spent: the call may still have reached Google. The burst flag stays too, so a
-// failing endpoint can't be hammered.
+// KEYS: userDay, poolDay, globalMinute, globalDay. Gives the user's daily request back, and the
+// pool's when there is one (ARGV[1] = "1"). The global counters stay spent (the call may still have
+// reached Google) unless ARGV[2] = "1": a failure before anything was sent to Google. The burst flag
+// always stays, so a failing endpoint can't be hammered.
 const REFUND = `
 local used = tonumber(redis.call("GET", KEYS[1]) or "0")
 if used > 0 then used = redis.call("DECR", KEYS[1]) end
 if ARGV[1] == "1" and tonumber(redis.call("GET", KEYS[2]) or "0") > 0 then redis.call("DECR", KEYS[2]) end
+if ARGV[2] == "1" then
+  for i = 3, 4 do
+    if tonumber(redis.call("GET", KEYS[i]) or "0") > 0 then redis.call("DECR", KEYS[i]) end
+  end
+end
 return used`;
 
 function client() {
   const redis = getRedis();
   if (!redis.aiReserve) {
     redis.defineCommand("aiReserve", { numberOfKeys: 5, lua: RESERVE });
-    redis.defineCommand("aiRefund", { numberOfKeys: 2, lua: REFUND });
+    redis.defineCommand("aiRefund", { numberOfKeys: 4, lua: REFUND });
   }
   return redis;
 }
@@ -203,12 +209,20 @@ export async function reserveAiQuota(userId, now = new Date(), { pool = null } =
       remaining: Math.min(userLeft, poolLeft),
       resetsAt: windows.nextMidnight.toISOString(),
     },
-    // Refunds the same day's counter even if the call ran past midnight. Safe to call twice.
-    async refund() {
+    // Refunds the same day's (and minute's) counters even if the call ran past them. Safe to call
+    // twice. { all: true } for a failure before anything reached Google: the global counters too.
+    async refund({ all = false } = {}) {
       if (refunded) return;
       refunded = true;
       try {
-        await client().aiRefund(userDayKey, poolDayKey, pool ? "1" : "0");
+        await client().aiRefund(
+          userDayKey,
+          poolDayKey,
+          keys.aiGlobalMinute(windows.minute),
+          keys.aiGlobalDay(windows.day),
+          pool ? "1" : "0",
+          all ? "1" : "0",
+        );
       } catch (err) {
         // The account id only: a demo subject also carries the caller's address.
         log.warn({ err, userId: String(userId).split("@")[0] }, "AI quota refund failed");
@@ -274,13 +288,17 @@ const aiCacheKey = (feature, input) =>
 
 // feature: "search" | "incident_summary" | "condition_compare"
 // input:   exactly what is sent to Gemini (no personal data, §15.3); identical input hits the cache
-// call:    () => Promise<result>, the Gemini request itself
+// prepare: optional () => Promise<value>, work needed before the request (fetching photos): run on a
+//          cache miss once the quota is reserved; if it fails, everything is refunded but the burst
+//          flag, since Google was never asked (and the flag keeps a failing source from being looped)
+// call:    (prepared) => Promise<result>, the Gemini request itself
 // → { result, cached, quota }
 export async function withAiQuota({
   userId,
   pool = null,
   feature,
   input,
+  prepare,
   call,
   now = new Date(),
 }) {
@@ -296,8 +314,15 @@ export async function withAiQuota({
     TTL.aiCacheSeconds,
     async () => {
       reservation = await reserveAiQuota(userId, now, { pool });
+      let prepared;
       try {
-        return await call();
+        prepared = prepare ? await prepare() : undefined;
+      } catch (err) {
+        await reservation.refund({ all: true });
+        throw err;
+      }
+      try {
+        return await call(prepared);
       } catch (err) {
         // Refunded unless Google worked on it (err.reachedAi, config/gemini.js): a member who can
         // make Gemini fail must not get unlimited free tries against the shared caps.

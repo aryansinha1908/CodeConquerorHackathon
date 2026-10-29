@@ -3,6 +3,7 @@ import http from '../../lib/http';
 import { retryReads } from '../../lib/errors';
 import { toDate } from '../../lib/time';
 import { toPhotoRefs } from '../uploads/api';
+import { aiKeys, isAiQuotaOut, isAiUnavailable, storeAiQuota } from '../ai/api';
 
 // Bookings (api.md "Bookings"; frontend.md §6.2, §6.3, §8.2). One function per route. Each resolves
 // with { data, meta } from the success envelope (meta only on the paged lists) and rejects with
@@ -375,6 +376,33 @@ export async function getPassStatus(id) {
 export async function scanBookingPass(body) {
   const res = await http.post('/bookings/scan', body);
   return res.data;
+}
+
+/**
+ * POST /bookings/:id/ai-compare (the unit's managers and admins, once the item is checked out) →
+ * envelope; data { comparison: { summary, newDamageLikely, differences: [{ description, severity,
+ * checklistItem }] }, generatedAt, photos: { before, after }, quota, cached }. 409 without photos at
+ * both handovers, 429 AI_QUOTA_EXCEEDED, 503 AI_UNAVAILABLE.
+ */
+export async function compareHandoverPhotos(id) {
+  const res = await http.post(`/bookings/${encodeURIComponent(id)}/ai-compare`);
+  return res.data;
+}
+
+/**
+ * The AI photo comparison, on a click: a mutation, so nothing is asked by opening the page. Asking
+ * again later is free (the server caches by the photos). The answer's quota updates the meter.
+ */
+export function useAiCompare() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: compareHandoverPhotos,
+    onSuccess: (envelope) => storeAiQuota(queryClient, envelope?.data?.quota),
+    // A 503 can still have spent a request (Gemini timed out or answered badly): re-read the meter.
+    onError: (err) => {
+      if (isAiQuotaOut(err) || isAiUnavailable(err)) queryClient.invalidateQueries({ queryKey: aiKeys.quota });
+    },
+  });
 }
 
 /** How often an open, not yet verified pass asks whether the unit has scanned it. */

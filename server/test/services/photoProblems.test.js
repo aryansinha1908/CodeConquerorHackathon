@@ -102,3 +102,21 @@ describe("photoProblems", () => {
     assert.deepEqual(photoProblems([]), []);
   });
 });
+
+test("photoProblems refuses a public id that carries a Cloudinary transformation or an odd segment", (t) => {
+  const saved = process.env.CLOUDINARY_CLOUD_NAME;
+  process.env.CLOUDINARY_CLOUD_NAME = "campus";
+  t.after(() => {
+    if (saved === undefined) delete process.env.CLOUDINARY_CLOUD_NAME;
+    else process.env.CLOUDINARY_CLOUD_NAME = saved;
+  });
+  for (const publicId of [
+    "if_w_lte_768/l_pristine/fl_layer_apply/if_end/campuscommons/photos/real",
+    "w_8/campuscommons/photos/x",
+    "l_fetch:aHR0cHM6Ly9ldmlsLmV4YW1wbGU=/campuscommons/photos/x",
+    "e_blur,w_10/campuscommons/photos/x",
+  ]) {
+    assert.equal(photoProblems([photo(publicId)]).length, 1, publicId);
+  }
+  assert.deepEqual(photoProblems([photo("campuscommons/photos/3f2b1c9e-0a1b-4c2d-9e8f-123456789abc")]), []);
+});

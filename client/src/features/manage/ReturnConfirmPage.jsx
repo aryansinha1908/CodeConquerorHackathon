@@ -18,6 +18,7 @@ import {
   useConfirmReturn,
   useTimeline,
 } from '../bookings/api';
+import { AiCompareCard } from './components/AiCompareCard';
 import { Field, LinkButton } from './components/Bits';
 import { ReportComparison } from './components/ReportComparison';
 import { ReturnForm } from './components/ReturnForm';
@@ -32,7 +33,8 @@ import {
 } from './components/manageView';
 
 // /manage/returns/:bookingId (frontend.md §6.3, F-12; judge step 10): the borrower's check-in and
-// check-out reports side by side, the manager's own checklist, then "All good" or "Report issue"
+// check-out reports side by side, the AI photo comparison on a click (FC-13, a suggestion), the
+// manager's own checklist, then "All good" or "Report issue"
 // (POST /bookings/:id/confirm-return, api.md "Bookings"). On success the hook refetches the
 // booking, its timeline, every booking list, the resource's availability and, for an issue, the
 // incident lists; then the page returns to /manage/handovers.
@@ -266,6 +268,21 @@ function ReturnConfirm({ bookingId }) {
           <ReportComparison checklist={checklist} checkIn={checkIn} checkOut={checkOut} subject={title} />
         )}
       </section>
+
+      {timelineQuery.data && (
+        <AiCompareCard
+          bookingId={bookingId}
+          status={booking.status}
+          checkIn={checkIn}
+          checkOut={checkOut}
+          returnCheck={latestReport(items, 'return_confirmation')}
+          showForm={showForm}
+          onStale={() => {
+            bookingQuery.refetch();
+            timelineQuery.refetch();
+          }}
+        />
+      )}
 
       {showForm && (
         <section

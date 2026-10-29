@@ -334,6 +334,11 @@ export function PhotosStep({
           : "Optional. Photograph the item as you found it, so damage that was already there isn't put down to you."}
       </StepHeading>
       {checkOut && <CheckInReference report={reference} query={referenceQuery} subject={subject} />}
+      {/* architecture.md §15.3: the unit may have Google Gemini compare these photos at the return. */}
+      <p className="text-xs text-[#1a1a1a]/75">
+        Photograph only the item: no faces, people or ID cards. The unit may have Google Gemini
+        compare your pickup and return photos; on Gemini&apos;s free tier Google may keep and review them.
+      </p>
       <PhotoUploader
         value={photos}
         onChange={onPhotos}

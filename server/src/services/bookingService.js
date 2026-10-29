@@ -452,6 +452,18 @@ async function createReport(booking, resource, phase, actor, report) {
   }
 }
 
+// The return photos must be new: a pickup photo sent again at return would show the item as it was
+// (and the AI photo comparison would find nothing). → 400 with the photo's path.
+async function assertNewPhotos(booking, photos) {
+  if (!Array.isArray(photos) || !photos.length) return;
+  const pickup = await ConditionReport.findOne({ booking: booking._id, phase: "check_in" }, { photos: 1 }).lean();
+  const used = new Set((pickup?.photos ?? []).map((p) => p.publicId));
+  const problems = photos
+    .map((p, i) => (used.has(p?.publicId) ? { path: `photos.${i}`, message: "This photo was used at check-in. Take a new one of the item as it is now." } : null))
+    .filter(Boolean);
+  if (problems.length) throw invalid("Use new photos for the return.", problems);
+}
+
 const HANDOVERS = {
   checkIn: { phase: "check_in", field: "checkIn" },
   checkOut: { phase: "check_out", field: "checkOut" },
@@ -479,6 +491,7 @@ async function handover(
   });
   if (!check.ok) throw fromCheck(check);
   assertChecklist(resource, report.items);
+  if (phase === "check_out") await assertNewPhotos(booking, report.photos);
 
   const saved = await createReport(booking, resource, phase, actor, report);
   try {
