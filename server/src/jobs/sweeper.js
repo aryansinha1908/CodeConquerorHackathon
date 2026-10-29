@@ -248,17 +248,28 @@ export async function runSweep({ now = new Date() } = {}) {
 }
 
 let task = null;
+// The sweep in progress (the boot one or a scheduled one), so stopSweeper can wait for it.
+let running = null;
 
 // Call once at boot, after connectRedis(). CRON_ENABLED=false turns it off (tests, extra instances).
 // runNow sweeps straight away: a free Render instance that slept has missed its runs (§14).
-export function startSweeper({ runNow = true } = {}) {
+// `run` replaces runSweep in the tests.
+export function startSweeper({ runNow = true, run = runSweep } = {}) {
   if (process.env.CRON_ENABLED === "false") {
     log.info("Sweeper disabled (CRON_ENABLED=false)");
     return null;
   }
   if (task) return task;
-  const sweep = () =>
-    runSweep().catch((err) => log.error({ err }, "Sweep failed"));
+  const sweep = () => {
+    const current = Promise.resolve()
+      .then(run)
+      .catch((err) => log.error({ err }, "Sweep failed"))
+      .finally(() => {
+        if (running === current) running = null;
+      });
+    running = current;
+    return current;
+  };
   task = schedule(SWEEP_SCHEDULE, sweep, {
     name: "sweep",
     timezone: "Asia/Kolkata",
@@ -270,9 +281,11 @@ export function startSweeper({ runNow = true } = {}) {
 }
 
 // For graceful shutdown (SIGTERM) and tests.
+// No new sweeps, then wait for the one in progress: shutdown closes MongoDB and Redis next, and a
+// sweep cut off half-way would fail every remaining step and leave its lock to expire.
 export async function stopSweeper() {
-  if (!task) return;
   const stopping = task;
   task = null;
-  await stopping.destroy();
+  await stopping?.destroy();
+  await running;
 }

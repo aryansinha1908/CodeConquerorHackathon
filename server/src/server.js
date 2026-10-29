@@ -56,7 +56,8 @@ process.once("unhandledRejection", (reason) => {
 });
 
 // MongoDB is required. Redis isn't: without it the API still starts, with no cache, and bookings
-// answer 503 until it reconnects. The sweeper starts after MongoDB, because it queries bookings.
+// answer 503 until it reconnects. The sweeper starts last, once the server is listening: it queries
+// bookings, and a start that fails (the port is taken) should shut down without a sweep under way.
 async function start() {
   await connectDb();
   if (shuttingDown) return;
@@ -65,14 +66,16 @@ async function start() {
   if (shuttingDown) return;
   await connectRedis({ logger });
   if (shuttingDown) return;
-  startSweeper();
-  server = app.listen(PORT, () =>
-    logger.info({ port: PORT }, "HTTP server listening"),
-  );
+  // Express 5 also calls this callback when listen fails (with the error), so log only a success.
+  server = app.listen(PORT, (error) => {
+    if (!error) logger.info({ port: PORT }, "HTTP server listening");
+  });
   server.once("error", (error) => {
     void shutdown("serverError", error);
   });
   await once(server, "listening");
+  if (shuttingDown) return;
+  startSweeper();
 }
 
 // config/env.js: in production a missing setting or a short secret stops the boot before anything
