@@ -332,9 +332,50 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
      - contradictory staff wording on /profile;
      - the shared `['badges', 'mine']` cache shape.
    - **Tests:** 319 client tests (309 + 10 new: profile, the account menu and its panel, the logout race, card link, filter box, "See all"). Server untouched.
+7. ✅ **Five cool-to-have features (30 Oct).** One phase each, local commits only: build, then three read-only review agents in parallel (backend, frontend, security), then every finding reproduced (a failing test or a browser check) before it was fixed, then the gate (both suites, lint, build, a Playwright check on the dev server with the API mocked).
+   - **Groundwork** (`72cdf1b`, `b3f098c`): the Gemini REST client (`config/gemini.js`, no SDK), `GET /ai/quota`, and the AI quota made demo-safe. Demo accounts count per account and visitor, inside one shared daily pool, so a forged `X-Forwarded-For` can't get past it.
+   - **How it works and the guided tour** (`4769820`, FC-01, FC-03): `/how-it-works`, public and static. A `driver.js` tour per page on `data-tour` targets, from the **?** in the header. Review fixes: the tour stayed over the next page, focus was lost, and tour text was rendered as HTML (now escaped).
+   - **QR booking pass and scanner** (`3519390`, C-04, FC-05): a 2-minute signed pass plus a 6-character code that works once; `/manage/scan` with the camera or the typed code; verify, then open the next step. Review fixes:
+     - reusable codes (now `GETDEL`);
+     - repeated scans audited twice;
+     - a live code for another unit was distinguishable from a dead one;
+     - a flaky forged-token test (a non-canonical base64 tag);
+     - a worker leaked on each scan;
+     - a stale QR left on screen.
+   - **AI search** (`d83b16c`, C-05, FC-06): **Ask in your own words** on Explore, picks with Gemini's reason and eligibility, and the keyword fallback on 429/503. Review fixes:
+     - a failure Google worked on is now charged, not refunded, so failing calls can't drain the global cap for free;
+     - `maxOutputTokens`;
+     - emails, roll numbers and phone numbers redacted from the question and the catalogue;
+     - reasons with links withheld;
+     - verified members only;
+     - the cache key is the exact prompt text;
+     - a `?ask` link waits for a click;
+     - the fallback survives a retry and Back;
+     - one live region.
+   - **AI photo comparison** (`245d827`, C-15, FC-13): the return check's **Compare with AI**. Review fixes:
+     - photos fetched in a new `prepare` step, so a failed fetch refunds everything;
+     - public ids carrying a Cloudinary transformation refused at write;
+     - check-out refuses a pickup photo;
+     - the demo admin kept off real members' photos;
+     - a `comparable` flag;
+     - size and total caps;
+     - the manager's own photos as a fallback;
+     - the card doesn't steal focus, and a double click doesn't pay twice.
+   - **On-device ID-card check** (`efabd70`, FC-12): Tesseract 7 in the browser, self-hosted under `/tesseract/`. Only yes/no answers go with the upload, and the admin can re-check in their browser through `GET /admin/verifications/:userId/id-card/file`. Review fixes:
+     - a hang when the model download failed (a Tesseract bug; the model is now fetched first with a deadline);
+     - workers ended on every path;
+     - the card's type read from its bytes, not Cloudinary's header;
+     - the server decides which checks count;
+     - a capped read, and HEAD refused;
+     - fuzzier institute, roll-number, name and year matching for real OCR;
+     - Blob error bodies parsed in `lib/http.js`.
+   - **Merged in** the teammate's `/badges` page (PR #19) as `9da163c`.
+   - **Tests:** 827 server tests with MongoDB (356 + 2 skipped without), 374 client tests.
 
 **Open, in priority order:**
-1. **The member's `/badges` page (teammate).** Judge step 3, a student requesting a badge, can't be done in the UI until it lands: the API is ready (`POST /badges/:id/requests`, `GET /badges/mine`; see `docs/api.md`) and the eligibility checklist already links to `/badges?request=<code>`. If it doesn't arrive, it's a small page to build.
+1. **Set `GEMINI_API_KEY`** in `server/.env` and on Render (`docs/deploy.md` §3b), then try AI search and the photo comparison against the real API. Every AI test so far used a fake Gemini, and the photo comparison needs real handover photos.
+   - **Check once on the deployed site:** that the admin's "Check on this device" loads a real card. Cloudinary's Download API is assumed to answer with the image, or one redirect to it within the account; the server reads the type from the bytes either way.
+   - The dead teammate files (`features/bookings/components/BookingPanel.jsx`, `CheckInOutWizard.jsx`, `BookingTimeline.jsx`, `features/manage/ReviewQueuePage.jsx`) are unused and hold the remaining lint warnings.
 2. **Deploying, with your accounts:** follow `docs/deploy.md`.
    - Generate **new** JWT secrets and OTP pepper, because the old ones leaked in early commits.
    - Render's free plan blocks the usual SMTP ports, so use Brevo on port 2525.

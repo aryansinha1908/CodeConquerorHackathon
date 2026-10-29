@@ -10,14 +10,14 @@ Related docs: [`backend.md`](./backend.md) · [`frontend.md`](./frontend.md) · 
 
 ---
 
-## Implementation status (29 Oct 2026)
+## Implementation status (30 Oct 2026)
 
-This file is the design. Each major section now opens with a **Status:** line, checked against the code on 29 Oct 2026, and rows are marked where their status differs from the section's.
+This file is the design. Each major section now opens with a **Status:** line, checked against the code on 29 Oct 2026 (and on 30 Oct for the five features added that day: §6.2, §8, §10, §11, §15, §16), and rows are marked where their status differs from the section's.
 
-- **Built:** the whole MVP lifecycle (§1.4): sign-up with an email code, ID-card verification, resources, badges, the 12-rule eligibility engine, bookings under a Redis lock, the FIFO waitlist, handovers, return confirmation, incidents, in-app notifications, the audit log and timeline, and the 5-minute sweeper. It is deployed on Vercel, Render (free plan), MongoDB Atlas, Upstash Redis, Cloudinary and Brevo SMTP.
+- **Built:** the whole MVP lifecycle (§1.4): sign-up with an email code, ID-card verification, resources, badges, the 12-rule eligibility engine, bookings under a Redis lock, the FIFO waitlist, handovers, return confirmation, incidents, in-app notifications, the audit log and timeline, and the 5-minute sweeper. Five cool-to-haves since 30 Oct: the signed QR booking pass and the unit's scanner, AI search and the AI photo comparison (Gemini, under the §15.2 quota), the on-device ID-card check (§15.3), and the public How it works page with a guided tour. It is deployed on Vercel, Render (free plan), MongoDB Atlas, Upstash Redis, Cloudinary and Brevo SMTP.
 - **Partial:** RBAC (enforced, but no API to change roles or suspend users), email notifications (sign-up codes and ID decisions only), and input validation (hand-written checks in the services instead of Zod, and no HTML stripping).
-- **Not built:** every cool-to-have (§6.2, §15, the §17 upgrades), the audit hash chain, admin pages for users and org units, database transactions, badge revoke, and a shared secret between Vercel and Render.
-- **Changed from the design:** routes call the services directly, with no `controllers/`, `validators/` or `validate()` middleware (§3). Tests use `node:test`: server 327 pass and 2 skip without `TEST_MONGODB_URI` (all 743 pass with a local MongoDB); client 319 pass.
+- **Not built:** the other cool-to-haves (the rest of §6.2, the AI incident summary in §15, the §17 upgrades), the audit hash chain, admin pages for users and org units, database transactions, badge revoke, and a shared secret between Vercel and Render.
+- **Changed from the design:** routes call the services directly, with no `controllers/`, `validators/` or `validate()` middleware (§3). Tests use `node:test`: server 356 pass and 2 skip without `TEST_MONGODB_URI` (all 827 pass with a local MongoDB); client 374 pass (30 Oct).
 - **Legend:** ✅ built · 🟡 partial · ❌ not built.
 - **More:** history and decisions in [`progress.md`](./progress.md); the API as built in [`api.md`](./api.md), which wins where this file disagrees; the deployment as done in [`deploy.md`](./deploy.md).
 
@@ -93,7 +93,7 @@ A user can hold several roles at once; for example, a faculty member can be both
 | Technical depth and reliability (15)      | Input checks in every service (🟡 hand-written, not Zod: §12), Redis locks against double booking, an idempotent cron sweeper, caching, per-user rate limits, and structured logs           |
 | Trust, safety and accountability (10)     | Human ID verification, badges, before and after condition reports with photos, incidents with human resolution, and an append-only audit log            |
 | Fair allocation and accessibility (10)    | Weekly hour caps, an active-booking cap, a transparent FIFO waitlist, mandatory override reasons, and WCAG-AA UI                                        |
-| Originality and real-world potential (10) | Campus-email plus ID verification, explainable eligibility, an AI assistant under a hard quota that sends no personal data (❌ not built: only the quota module exists, §15), and NIT JSR-ready seed data |
+| Originality and real-world potential (10) | Campus-email plus ID verification, explainable eligibility, AI search and an AI photo comparison under a hard quota that send no personal data (§15), an ID-card check that runs on the member's own device, a signed QR booking pass, and NIT JSR-ready seed data |
 
 ---
 
@@ -298,7 +298,7 @@ All transitions are driven by the `TRANSITIONS` map in `engines/stateMachine.js`
 
 ## 6. API routes
 
-**Status:** ✅ The envelope and error codes are built as described (`lib/respond.js`, `middleware/errorHandler.js`). A body over 100 kB gets 413 `VALIDATION_ERROR`. `AI_QUOTA_EXCEEDED` and `AI_UNAVAILABLE` are defined but never sent. For what each route actually accepts and returns, [`api.md`](./api.md) is the reference.
+**Status:** ✅ The envelope and error codes are built as described (`lib/respond.js`, `middleware/errorHandler.js`). A body over 100 kB gets 413 `VALIDATION_ERROR`. `AI_QUOTA_EXCEEDED`, `AI_UNAVAILABLE` and `PASS_EXPIRED` are sent by the AI and pass routes (§6.2). For what each route actually accepts and returns, [`api.md`](./api.md) is the reference.
 
 Base path: **`/api/v1`**. JSON in and out, except for multipart uploads.
 
@@ -392,6 +392,7 @@ A wrong email or password is `401 INVALID_CREDENTIALS` with the same message for
 | GET    | `/verification/status`                 | auth                  | —                                                                        | `general` | —     |
 | GET    | `/admin/verifications`                 | admin                 | `status=pending\|approved\|rejected, page, limit`                        | `general` | —     |
 | GET    | `/admin/verifications/:userId/id-card` | admin                 | — (returns a 5-min signed URL; **audited**)                              | `general`, then `fileLink` | —     |
+| GET    | `/admin/verifications/:userId/id-card/file` | admin            | — (the card's bytes, for the admin's on-device check, §15.3; **audited**). Added 30 Oct | `general`, then `fileLink` | —     |
 | PATCH  | `/admin/verifications/:userId`         | admin                 | `decision: approve\|reject, submittedAt, reason, memberType, department` | `general` | —     |
 
 - `submittedAt` is the reviewed queue item's own value. If the member has replaced the card since, the decision is 409, so a decision never lands on a card the admin didn't see.
@@ -498,19 +499,19 @@ With `eligibleOnly`, the base list is cached and then filtered for the current u
 
 ### 6.2 Cool-to-have routes (not in MVP)
 
-**Status:** ❌ None of these routes exist.
+**Status:** 🟡 Five are built (30 Oct), under the paths in the ✅ rows, which differ from the design: each feature lives with its resource, and `/ai` only holds the quota. The rest don't exist. [`api.md`](./api.md) has the built ones in full.
 
 | Method | Path                                               | Auth                 | Purpose                                                                                                   |
 | ------ | -------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------- |
-| POST   | `/ai/search`                                       | verified             | Natural-language search. Gemini turns the query into filters, then a ranked list with reasons (tier `ai`) |
-| GET    | `/ai/quota`                                        | auth                 | `{ used, limit, remaining, resetsAt }` for the "AI searches left today" meter                             |
-| POST   | `/ai/incidents/:id/summary`                        | manager\* / admin    | Neutral summary of an incident (PII scrubbed)                                                             |
-| POST   | `/ai/bookings/:id/condition-compare`               | manager\*            | Before/after photo comparison as a _suggestion_                                                           |
+| POST   | `/ai/search` ✅ built as `POST /resources/ai-search` | verified             | Natural-language search: the resources Gemini picks, best first, each with its reason; no filters are inferred (the page's own filters narrow the picks) |
+| GET    | `/ai/quota` ✅                                      | auth                 | `{ used, limit, remaining, resetsAt, configured }` for the "AI requests left today" meter                 |
+| POST   | `/ai/incidents/:id/summary` ❌                      | manager\* / admin    | Neutral summary of an incident (PII scrubbed)                                                             |
+| POST   | `/ai/bookings/:id/condition-compare` ✅ built as `POST /bookings/:id/ai-compare` | manager\*            | Before/after photo comparison as a _suggestion_                                                           |
 | POST   | `/bookings/:id/extensions`                         | borrower             | Request a new end time                                                                                    |
 | PATCH  | `/bookings/:id/extensions/:extId`                  | manager\*            | Approve or deny an extension (conflict re-check)                                                          |
 | POST   | `/bookings/:id/offer/accept` · `/offer/decline`    | borrower             | Timed waitlist offers                                                                                     |
 | GET    | `/resources/:id/alternatives`                      | auth                 | Next free slots and similar resources when a slot is taken                                                |
-| GET    | `/bookings/:id/qr` · POST `/bookings/scan`         | borrower / manager\* | Signed QR pass for check-in and check-out                                                                 |
+| POST·GET `/bookings/:id/pass` · POST `/bookings/scan` ✅ (designed as `GET /bookings/:id/qr`) | borrower / manager\* | Signed 2-minute QR pass plus a one-use 6-character code; the scan verifies the booking (not the person), records `booking.pass_verified` and opens the next step |
 | POST   | `/incidents/:id/appeal`                            | borrower             | Contest an incident outcome; goes to an admin                                                             |
 | GET    | `/audit/verify`                                    | admin                | Recompute the hash chain and report the first broken link                                                 |
 | GET    | `/analytics/overview` · `/analytics/resources/:id` | manager / admin      | Utilisation, underused list, demand heatmap, Gini coefficient                                             |
@@ -620,6 +621,8 @@ sequenceDiagram
 
 - ID images are stored with Cloudinary's `authenticated` delivery type and are not publicly reachable.
 - Only admins can view them, through 5-minute signed URLs, and each view writes an audit entry.
+- ✅ (30 Oct) For the admin's on-device check (§15.3), `GET /admin/verifications/:userId/id-card/file` also passes the card's bytes through the API (and the Vercel rewrite) to the admin's browser: audited the same way, `Cache-Control: no-store`, images only, never logged.
+- ✅ (30 Oct) The member's browser can read the card with Tesseract before the upload and send yes/no answers (`ocrCheck`), stored next to the submission and shown to the admin as a hint, never proof. The card itself goes to no AI service.
 - The image is **deleted once a decision is made**. The decision record (who, when, outcome, reason) is kept.
 
 **Judges** don't have `@nitjsr.ac.in` emails. They use the seeded demo accounts through `POST /auth/demo-login`. Seeded users live on `@demo.campuscommons.test`, a domain the mailer never sends to.
@@ -657,7 +660,7 @@ POST /bookings
 
 ## 10. Redis: usage and caching strategy
 
-**Status:** ✅ Every key is built in `lib/redisKeys.js`. The `ai:*` keys are used only by `services/aiQuotaService.js`, which nothing calls yet. 🟡 The ioredis client (`config/redis.js`) has a 5-second `connectTimeout`, no offline queue and one retry per command, but no `commandTimeout`. So a command on a connection that stalls has no time limit of its own.
+**Status:** ✅ Every key is built in `lib/redisKeys.js`, and the `ai:*` keys are used since 30 Oct (§15.2). The pass keys live in `services/passService.js`. 🟡 The ioredis client (`config/redis.js`) has a 5-second `connectTimeout`, no offline queue and one retry per command, but no `commandTimeout`. So a command on a connection that stalls has no time limit of its own.
 
 ### 10.1 Key catalogue
 
@@ -674,18 +677,21 @@ POST /bookings
 | `cache:resources:v{n}:{sha1(query)}` | JSON                                   | 60 s   | Resource list / search results                               |
 | `cache:resource:{id}`                | JSON                                   | 5 min  | Resource detail                                              |
 | `cache:orgunits`, `cache:badges`     | JSON                                   | 10 min | Rarely changing catalogues                                   |
-| `ai:{q}:burst:{userId}`              | flag                                   | 10 s   | AI per-user burst limit (cool-to-have). ❌ Unused            |
-| `ai:{q}:user:{userId}:{YYYYMMDD}`    | counter                                | 48 h   | AI per-user daily quota. ❌ Unused                           |
-| `ai:{q}:global:{YYYYMMDD}`           | counter                                | 48 h   | AI global daily cap. ❌ Unused                               |
-| `ai:{q}:rpm:{YYYYMMDDHHmm}`          | counter                                | 120 s  | AI global per-minute cap. ❌ Unused                          |
-| `ai:cache:{feature}:{sha256(input)}` | JSON                                   | 24 h   | Cached AI responses (a hit costs no quota). ❌ Unused        |
-| `ai:circuit`                         | flag                                   | 10 min | Opened when Gemini returns 429. ❌ Unused                    |
+| `ai:{q}:burst:{userId}`              | flag                                   | 10 s   | AI per-user burst limit.            |
+| `ai:{q}:user:{userId}:{YYYYMMDD}`    | counter                                | 48 h   | AI per-user daily quota.                           |
+| `ai:{q}:global:{YYYYMMDD}`           | counter                                | 48 h   | AI global daily cap.                               |
+| `ai:{q}:rpm:{YYYYMMDDHHmm}`          | counter                                | 120 s  | AI global per-minute cap.                          |
+| `ai:{q}:pool:{pool}:{YYYYMMDD}`      | counter                                | 48 h   | The demo accounts' shared daily AI pool (`AI_DEMO_DAILY_LIMIT`) |
+| `ai:cache:{feature}:{sha256(input)}` | JSON                                   | 24 h   | Cached AI responses (a hit costs no quota)                   |
+| `ai:circuit`                         | flag                                   | 10 min | Opened when Gemini returns 429                               |
+| `pass:code:{code}`                   | string (the pass token)                | 120 s  | A QR pass's 6-character code; read once (`GETDEL`)           |
+| `pass:seen:{bookingId}:{exp}`        | flag                                   | 120 s  | One `booking.pass_verified` audit entry per pass (`SET NX`)  |
 
 `{q}` is a literal **hash tag**. It keeps every AI-quota key in one cluster slot, so the multi-key Lua script also works on clustered providers. Dates are **IST** (`Asia/Kolkata`).
 
 ### 10.2 Caching pattern
 
-**Status:** ✅ Built as described (`services/cacheService.js`): cache-aside, list versions bumped with `INCR`, detail keys deleted, and nothing per-user cached. The Redis-down behaviours hold, except the AI row, which has nothing to protect yet.
+**Status:** ✅ Built as described (`services/cacheService.js`): cache-aside, list versions bumped with `INCR`, detail keys deleted, and nothing per-user cached. The Redis-down behaviours hold, the AI row included: with Redis down, AI answers 503 and keyword search carries on.
 
 - **Cache-aside.** Read from Redis; on a miss, read Mongo, write Redis with a TTL, and return.
 - **List invalidation by versioning.** Any resource write runs `INCR cache:resources:ver`. All old list keys become unreachable and expire on their own. There is no `KEYS` or `SCAN` scan.
@@ -704,7 +710,7 @@ POST /bookings
 
 ## 11. Rate limiting (never IP alone)
 
-**Status:** ✅ Every tier in the table below is mounted (`middleware/rateLimit.js`), along with the global cap on code emails. The `ai` tier isn't mounted, because there are no AI routes. 🟡 There are two known weaknesses:
+**Status:** ✅ Every tier in the table below is mounted (`middleware/rateLimit.js`), along with the global cap on code emails. The `ai` quota (§15.2) is applied inside the AI services, not as a middleware tier. 🟡 There are two known weaknesses:
 - The per-user tiers key on the user id (`byUser()`, `rateLimit.js:44`). So everyone signed in to the same demo account shares one counter: for example, 10 booking requests an hour among all the judges on the "student" role.
 - Vercel and Render share no secret (❌), so a direct caller can forge `X-Forwarded-For` to get fresh per-IP counters (points 4 and 5).
 
@@ -746,7 +752,7 @@ Implementation: `express-rate-limit` with a small Redis store (`lib/redisRateLim
 | `bookingCreate` | userId             | 10 / hour                        | Discourages slot-spamming. 🟡 Shared by everyone on one demo account                                                                                                                                                             |
 | `upload`        | userId             | 20 / hour                        | ID cards, condition photos, evidence. 🟡 Shared by everyone on one demo account                                                                                                                                                  |
 | `fileLink`      | userId             | 20 / 15 min                      | Signed links to private files: each costs a Cloudinary Admin API call from a shared quota                                                                                                                                        |
-| `ai`            | userId plus global | **Hard quota** (§15.2)           | Custom middleware, not `express-rate-limit`. ❌ Not mounted: no AI routes                                                                                                                                                         |
+| `ai`            | userId plus global | **Hard quota** (§15.2)           | Not `express-rate-limit` and not a middleware: `withAiQuota()` in the AI services. A demo account's counter is per account and visitor, inside one shared demo pool                                                         |
 
 ---
 
@@ -875,24 +881,24 @@ The steps run in this order, so slots freed by no-shows go to the waitlist befor
 
 ## 15. AI layer (cool-to-have, Gemini free tier)
 
-**Status:** ❌ Not built. There is no `aiService`, no `@google/genai` dependency, no `/ai` route, and no `GEMINI_*` variable in `server/.env.example`. Only the §15.2 hard quota exists, in `services/aiQuotaService.js`, with tests, and nothing calls it.
+**Status:** 🟡 Built on 30 Oct for search and the photo comparison; ❌ the incident summary isn't. The design changed in four ways, marked below: no SDK, no Zod, the routes live with their resources (§6.2), and the search returns picks rather than filters.
 
 ### 15.1 Design
 
-- **SDK and model.** `@google/genai`, with the model from `GEMINI_MODEL`. Use whichever Flash or Flash-Lite model AI Studio shows as free for the project.
-- **One `aiService` module.** It holds one prompt and one response schema per feature, and uses JSON output mode. Responses are parsed with **Zod**; invalid output becomes an `AI_UNAVAILABLE` response, never a crash.
-- **8-second timeout.** On timeout the user gets the non-AI fallback.
-- **AI suggests, humans decide.** AI output is stored as `aiSuggestion` _next to_ the human decision field and is never applied automatically. The UI labels it "AI suggestion: verify before acting".
+- **SDK and model.** 🟡 _Built without an SDK:_ `config/gemini.js` calls the REST `generateContent` endpoint with Node's `fetch`, the key in the `x-goog-api-key` header, JSON output with a response schema, and `maxOutputTokens` (512 for search, 768 for the comparison). The model is `GEMINI_MODEL` (default `gemini-2.5-flash`, with thinking off).
+- **One module per feature.** 🟡 `services/aiSearchService.js` and `services/photoCompareService.js` each hold one prompt and one response schema. The answer is checked by hand-written code, not Zod: indices outside the catalogue dropped, severities and checklist labels only from the known lists, text cut short and cleaned, anything with a link, an email or a phone number replaced. Invalid output becomes `AI_UNAVAILABLE`, never a crash.
+- **Timeout.** 🟡 12 seconds for search and 20 for the comparison (8 was too short with images). On timeout the user gets the non-AI fallback.
+- **AI suggests, humans decide.** ✅ Nothing the model says is applied: search picks are checked against the real eligibility, and the comparison sits beside the unchanged confirm-return form. The UI labels both as Gemini's suggestion.
 
-| Feature           | Input sent to Gemini                                                                                  | Fallback                           |
-| ----------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| Smart search      | The user's query text, plus a compact catalogue (id, title, category, unit, badges): **no user data** | Normal keyword search with filters |
-| Incident summary  | Incident text with names and roll numbers replaced by `[BORROWER]` / `[MANAGER]`                      | Manager reads the raw thread       |
-| Condition compare | Before and after photos of the **equipment**, plus checklist labels                                   | Side-by-side photos only           |
+| Feature           | Input sent to Gemini                                                                                  | Fallback                           | Status |
+| ----------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------- | ------ |
+| Smart search      | The user's query text, plus a compact catalogue (title, category, unit, building, booking mode, badges, a short description), with emails, roll numbers and phone numbers taken out of both: **no user data** | Normal keyword search with the same words | ✅ |
+| Incident summary  | Incident text with names and roll numbers replaced by `[BORROWER]` / `[MANAGER]`                      | Manager reads the raw thread       | ❌ |
+| Condition compare | Before and after photos of the **equipment** (fetched by the server from our Cloudinary, at most 768 px), plus checklist labels; never the reports' notes | Side-by-side photos only           | ✅ |
 
 ### 15.2 Hard quota (Redis)
 
-**Status:** 🟡 Built and tested in `services/aiQuotaService.js` (`reserveAiQuota`, `withAiQuota`): the Lua script, circuit breaker, response cache and refund, all failing closed. Nothing calls it yet. The `AI_*` limits are in `.env.example` and `render.yaml`.
+**Status:** ✅ Built and used by both AI features (`services/aiQuotaService.js`: `reserveAiQuota`, `withAiQuota`): the Lua script, circuit breaker, response cache and refund, all failing closed. Two additions on 30 Oct: the demo pool (all demo accounts share `AI_DEMO_DAILY_LIMIT`, and each demo counter is per visitor) and a `prepare` step (the photo fetch) whose failure refunds everything. A refund now happens only when Google never worked on the request: a timeout or a blocked or broken answer stays charged, so a crafted question can't loop for free. The `AI_*` limits are in `.env.example` and `render.yaml`.
 
 Google no longer publishes fixed free-tier numbers. Recent third-party reports put Flash anywhere from about 20 to 1,500 requests per day per project. So **every limit is an env var**: read your project's real limits in AI Studio and set the global cap safely below them.
 
@@ -931,12 +937,12 @@ return {1, 'OK'}
 
 ### 15.3 Privacy on the free tier
 
-**Status:** ❌ Nothing to apply yet, since no data goes to any AI. There's no in-browser OCR (`tesseract.js` isn't a client dependency) and no AI privacy note in the app.
+**Status:** ✅ Applied (30 Oct). The ID-card check runs in the browser with `tesseract.js`, self-hosted under `/tesseract/` (the CSP gains only `'wasm-unsafe-eval'`). The AI box, the photo step, the comparison card and How it works all say that the AI features use Gemini's free tier.
 
 On unpaid tiers, Google may use prompts and responses to improve its products, and **human reviewers may read them**. So:
 
-- **No personal data ever goes to Gemini:** no names, emails, roll numbers or ID cards.
-- ID-card help (cool-to-have) uses **in-browser OCR** with `tesseract.js`. The roll number is read on the user's device and compared with the email-derived roll number, and the image never reaches a third-party AI.
+- **No personal data ever goes to Gemini:** no names, emails, roll numbers or ID cards. ✅ Emails, roll numbers and phone numbers are also taken out of what users and staff type (the question, resource descriptions). Condition photos are of equipment, and the borrower is asked not to photograph people or ID cards.
+- ID-card help uses **in-browser OCR** with `tesseract.js`. ✅ The institute's name, the roll number (compared with the email's), the account's name and the year are looked for on the user's device, and the image never reaches a third-party AI. Only the yes/no answers go with the upload. The admin can run the same check in their own browser.
 - The privacy note in the app says that AI features use Google Gemini's free tier.
 
 ---
@@ -948,7 +954,7 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 | Area            | Measure                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Transport       | HTTPS everywhere (Vercel and Render); HSTS through `helmet`                                                                                                                                                                                                                                                                                                                                                                                            |
-| Headers         | `helmet()` defaults, plus `contentSecurityPolicy` tuned for Cloudinary image hosts on the client. ✅ The API sends `helmet()` defaults; the client's CSP, `nosniff`, `Referrer-Policy` and `X-Frame-Options` come from Vercel (`client/vercel.json`)                                                                                                                                                                                                                                                                                                                                                       |
+| Headers         | `helmet()` defaults, plus `contentSecurityPolicy` tuned for Cloudinary image hosts on the client. ✅ The API sends `helmet()` defaults; the client's CSP, `nosniff`, `Referrer-Policy` and `X-Frame-Options` come from Vercel (`client/vercel.json`). `script-src` has `'wasm-unsafe-eval'` for Tesseract's WebAssembly (no `eval`)                                                                                                                                                                                                                                                                                                                                                       |
 | CORS            | Same-origin in production via the Vercel rewrite; in dev an allowlist of `CLIENT_URL` with `credentials: true` (the same allowlist also answers direct calls in production)                                                                                                                                                                                                                                                                                                                                         |
 | Cookies         | Refresh cookie is `httpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`                                                                                                                                                                                                                                                                                                                                                                               |
 | Proxy           | `trust proxy` is a hop count (`TRUST_PROXY_HOPS`: 1, Render's proxy, by default; 2 behind Vercel), never `true`. The IP ceilings key on every forwarded address, ending with the one Render's proxy saw, so a client can't land on someone else's counter with `X-Forwarded-For` (§11). 🟡 Nothing proves a request came through Vercel (❌ no shared secret), so a direct caller can still get fresh counters of their own                                                                                                                                                                 |
@@ -957,7 +963,7 @@ On unpaid tiers, Google may use prompts and responses to improve its products, a
 | Injection       | 🟡 Hand-written checks in the services (not Zod, §12) plus `strictQuery: 'throw'`; no `$where` or raw string queries; ❌ HTML is **not** stripped from free text; React escapes output                                                                                                                                                                                                                                                                                                                                 |
 | Uploads         | Size and count caps, MIME and magic-byte check, Cloudinary stores the files (never our disk), random public IDs                                                                                                                                                                                                                                                                                                                                        |
 | Least data      | Managers see a borrower's name, member type, department and history with _their own_ unit, never email-derived roll numbers or ID images; availability endpoints show "busy" blocks with no names                                                                                                                                                                                                                                                      |
-| ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision                                                                                                                                                                                                                                                                                                                                            |
+| ID documents    | Private Cloudinary storage, 5-minute signed URLs, an audit entry for every view, deleted after the decision. Since 30 Oct the card's bytes can also pass through the API to an admin's browser for the on-device check (audited, `no-store`, images only, never logged), and the member's device check reaches the server only as yes/no answers |
 | Human oversight | Rejections, waitlisting, cancellations by managers, incident outcomes and suspensions all need a human actor plus a written reason; strikes only _suggest_ suspension to an admin. 🟡 Strikes are counted, but nothing shows them to an admin (the admin user list leaves them out), and no route suspends anyone                                                                                                                                                                                                                                                                      |
 | Demo data       | All fictional; seeded accounts on a `.test` domain; no real NIT JSR personal data. The public demo admin can only see and review demo accounts, never real users' ID cards. Elsewhere the one-click demo admin and manager act as real staff, so the server warns at boot when `DEMO_MODE=true` and accounts outside the demo domain exist: run a deployment demo-only, or with `DEMO_MODE` off                                                        |
 | Third-party AI  | Free-tier caveat disclosed; no PII sent (§15.3). ❌ No AI is built, so nothing is sent at all                                                                                                                                                                                                                                                                                                                                                                                                        |

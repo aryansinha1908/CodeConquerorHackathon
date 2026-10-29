@@ -2,14 +2,16 @@
 
 CampusCommons lets departments and central facilities at **NIT Jamshedpur** share underused spaces, equipment and computing resources with verified students and faculty. Only `@nitjsr.ac.in` addresses can join, a human checks every student or faculty ID card, and every resource carries its own eligibility rules (training badges, member type, department), approval mode and fair-usage limits. Every booking then moves through an auditable lifecycle, from request to return confirmation.
 
+On top of that: a refreshing **QR booking pass** the unit scans at pickup and return; **AI search** ("something to print a phone case") and an **AI before/after photo comparison** at the return, both with Google Gemini and both only suggestions; an **ID-card check that runs on the member's own device**, so the card never goes to an AI company; and a public **How it works** page with a **guided tour** of each page.
+
 Built in 48 hours for a hackathon. It is an independent prototype, not affiliated with the institute: no official logo or branding is used, and every seeded person, roll number and item of inventory is fictional.
 
 ## Stack
 
 | Part | What |
 |---|---|
-| Client (`client/`) | React 19, Vite 8, React Router 7, TanStack Query 5, Zustand, React Hook Form + Zod, Tailwind CSS 4, Headless UI, framer-motion, lucide-react, sonner |
-| Server (`server/`) | Node 20+ (ESM), Express 5, Mongoose 9 on MongoDB, ioredis 5 on Redis, JWT access tokens with rotating refresh cookies and email OTP, Cloudinary uploads, Nodemailer, a `node-cron` sweeper, pino logs, helmet, express-rate-limit |
+| Client (`client/`) | React 19, Vite 8, React Router 7, TanStack Query 5, Zustand, React Hook Form + Zod, Tailwind CSS 4, Headless UI, framer-motion, lucide-react, sonner; `qrcode` and `qr-scanner` for the pass, `driver.js` for the tour, `tesseract.js` (self-hosted) for the on-device ID check |
+| Server (`server/`) | Node 20+ (ESM), Express 5, Mongoose 9 on MongoDB, ioredis 5 on Redis, JWT access tokens with rotating refresh cookies and email OTP, Cloudinary uploads, Nodemailer, a `node-cron` sweeper, pino logs, helmet, express-rate-limit; Google Gemini over its REST API (no SDK), behind hard daily quotas, a shared cache and a circuit breaker |
 | Hosting | Vercel (client, rewriting `/api/*` to the API), Render (API), MongoDB Atlas, Upstash Redis, Cloudinary, Brevo or Gmail SMTP |
 
 ```
@@ -45,7 +47,7 @@ Then edit `server/.env`:
 | `SEED_PASSWORD` | The demo users' password: 8–72 characters with a letter and a digit |
 | `DEMO_MODE` | `true`, for the role buttons on the login page |
 
-Leave `SMTP_HOST` empty and the OTP codes are printed in the server's log instead of emailed. Leave the `CLOUDINARY_*` keys empty and uploads answer 503 while everything else works; fill them in to try ID cards and condition photos.
+Leave `SMTP_HOST` empty and the OTP codes are printed in the server's log instead of emailed. Leave the `CLOUDINARY_*` keys empty and uploads answer 503 while everything else works; fill them in to try ID cards and condition photos. Leave `GEMINI_API_KEY` empty and the AI search and photo comparison say AI isn't set up while everything else works; a free key from [Google AI Studio](https://aistudio.google.com/apikey) turns them on (the `AI_*` limits in `.env.example` keep it on the free tier).
 
 **2. Install and seed.**
 
@@ -81,8 +83,8 @@ Open <http://localhost:5173>. The Vite dev server proxies `/api` to `http://loca
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Vite dev server with the `/api` proxy |
-| `npm run build` | Production build into `client/dist` |
+| `npm run dev` | Vite dev server with the `/api` proxy (first copies Tesseract into `public/tesseract/`, git-ignored) |
+| `npm run build` | Production build into `client/dist` (the same copy runs first) |
 | `npm run preview` | Serves the build locally (same proxy) |
 | `npm test` | `node --test test/*.test.mjs` |
 | `npm run lint` | oxlint |
@@ -141,8 +143,8 @@ The API deploys to Render from [`render.yaml`](render.yaml), and the client to V
 
 ## Team note
 
-The member's **`/badges` page belongs to a teammate**: please don't change it. The manager's badge queue at `/manage/badges` lives in its own files.
+The member's **`/badges` page and the home page belong to a teammate**: please don't change them. The manager's badge queue at `/manage/badges` lives in its own files.
 
 ## Security
 
-The repository is public. Never commit `.env` files (they are git-ignored); `server/.env.example` holds placeholders only. Rate limits key on users, emails and roles, with coarse per-IP ceilings on the sign-in routes; managers never see borrowers' emails or ID cards; ID cards live in private Cloudinary storage and open only through 5-minute signed links.
+The repository is public. Never commit `.env` files (they are git-ignored); `server/.env.example` holds placeholders only. Rate limits key on users, emails and roles, with coarse per-IP ceilings on the sign-in routes; managers never see borrowers' emails or ID cards; ID cards live in private Cloudinary storage and open only through 5-minute signed links. The AI features send Gemini only the catalogue, a search question (with emails, roll numbers and phone numbers taken out) and equipment photos with checklist labels; never names, ID cards or anything about the member.

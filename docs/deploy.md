@@ -1,6 +1,6 @@
 # Deploying CampusCommons
 
-A checklist for putting the app on the internet: the API on **Render**, the SPA on **Vercel**, data in **MongoDB Atlas**, Redis on **Upstash**, files on **Cloudinary**, and email through **Brevo** or a **Gmail app password**. Work through it top to bottom; each step says what to copy into the next.
+A checklist for putting the app on the internet: the API on **Render**, the SPA on **Vercel**, data in **MongoDB Atlas**, Redis on **Upstash**, files on **Cloudinary**, email through **Brevo** or a **Gmail app password**, and the AI features on **Google Gemini**. Work through it top to bottom; each step says what to copy into the next.
 
 ```
 browser ──► Vercel (client/, static build)
@@ -8,7 +8,8 @@ browser ──► Vercel (client/, static build)
                                        ├─► MongoDB Atlas   (MONGODB_URI)
                                        ├─► Upstash Redis   (REDIS_URL)
                                        ├─► Cloudinary      (CLOUDINARY_*)
-                                       └─► SMTP            (SMTP_*, MAIL_FROM)
+                                       ├─► SMTP            (SMTP_*, MAIL_FROM)
+                                       └─► Google Gemini   (GEMINI_API_KEY)
 ```
 
 The browser only ever talks to the Vercel origin. Vercel forwards `/api/*` to Render, so the refresh cookie (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`) is first-party and production needs no CORS ([`architecture.md`](./architecture.md) §2, §18).
@@ -36,7 +37,7 @@ The config lives in the repo:
 | Branch                             | **`main`**                                                       | `render.yaml` and Vercel's production branch must name the same one                                                                                                                    |
 | `TRUST_PROXY_HOPS`                 | **`2`**, checked after the first deploy                          | Too low, and one visitor can lock every other visitor out of sign-in, sign-up and the demo roles ([§6](#6-vercel-the-client), "Client addresses"; the check is in [§9](#9-smoke-test)) |
 
-**You need:** accounts on Render, Vercel, MongoDB Atlas, Upstash, Cloudinary and Brevo (or a Google account with 2-Step Verification), push access to the GitHub repo, and Node 22 (or 20.19+) locally for the seed and the smoke test.
+**You need:** accounts on Render, Vercel, MongoDB Atlas, Upstash, Cloudinary and Brevo (or a Google account with 2-Step Verification), a Google account for AI Studio, push access to the GitHub repo, and Node 22 (or 20.19+) locally for the seed and the smoke test.
 
 **Secrets hygiene.** This repository is public, and its early commits contain a `server/.env` with JWT secrets and a `cookies.txt` with a refresh token. Treat every value that was ever committed as public: never paste anything from an old commit, or from a local `.env` that predates this checklist, into Render. [§11](#11-rotate-the-secrets) covers it.
 
@@ -109,6 +110,20 @@ Without all three values the API still runs, but every upload answers 503 "Uploa
 
 ---
 
+## 3b. Google Gemini (the AI features)
+
+AI search on Explore and the AI photo comparison on the return check use Gemini. The on-device ID-card check doesn't: it runs in the browser.
+
+- [ ] [Google AI Studio](https://aistudio.google.com/apikey) → **Create API key** in a new project. The free tier is enough for judging. On it, Google may keep what it receives and people may review it, which the app tells users (architecture.md §15.3); it never sends names, emails, roll numbers or ID cards.
+- [ ] Optional: `GEMINI_MODEL` (default `gemini-2.5-flash`). Check the name against the models your key lists in AI Studio; a wrong name makes every AI request answer 503, and Render's log says `Gemini call failed` with `googleStatus: "NOT_FOUND"`.
+- [ ] The limits come from `render.yaml`: 5 AI requests per account a day (`AI_USER_DAILY_LIMIT`), all demo accounts together 30 (`AI_DEMO_DAILY_LIMIT`), 8 a minute and 50 a day for everyone (`AI_GLOBAL_RPM`, `AI_GLOBAL_DAILY_LIMIT`), 10 seconds between one account's requests. Keep the global ones below what AI Studio shows for your key: a Gemini 429 pauses AI for everyone for 10 minutes. Answers are cached for 24 hours, so repeated questions are free.
+
+Without a key the API still runs: the AI parts say "AI isn't set up on this server yet", and keyword search and the manual return check carry on. The server logs a warning at start.
+
+**→ `GEMINI_API_KEY` (and `GEMINI_MODEL` if you set one)**
+
+---
+
 ## 4. SMTP (email)
 
 Email carries the OTP codes for registration and the ID-verification decisions. Addresses on `*.test` (all the demo accounts) are never emailed. Without `SMTP_HOST`, production sends nothing and logs `SMTP_HOST is not set, so an email was not sent`, so nobody can finish registering.
@@ -155,6 +170,7 @@ Port 465 means TLS from the start; every other port upgrades with STARTTLS (`ser
   | `REDIS_URL`                                                            | [§2](#2-upstash-redis)                                                                                                                                                                     |
   | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`        | [§4](#4-smtp-email)                                                                                                                                                                        |
   | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | [§3](#3-cloudinary)                                                                                                                                                                        |
+  | `GEMINI_API_KEY`, `GEMINI_MODEL` (optional)                            | [§3b](#3b-google-gemini-the-ai-features)                                                                                                                                                   |
   | `SEED_PASSWORD`                                                        | Optional: the server never reads it. Recording it here keeps the judges' password with the deployment                                                                                      |
 
   `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` and `OTP_PEPPER` are generated by Render (`generateValue`): new random values that never existed anywhere else. `NODE_ENV=production`, `DEMO_MODE=true`, `ALLOWED_EMAIL_DOMAINS=nitjsr.ac.in`, `CRON_ENABLED=true` and the rest come from the file. Change those in `render.yaml`, not the dashboard: a Blueprint sync puts them back to what the file says.
@@ -220,7 +236,7 @@ What `vercel.json` sets, and why:
 | `/api/:path*` rewrite                                          | Proxies to Render; cookies and `Set-Cookie` pass through, so the refresh cookie is set on the Vercel origin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | SPA fallback                                                   | Every other path except `/api/` and `/assets/` serves `index.html`, so a deep link like `/bookings/…` loads the app. A missing `/assets/…` file is a plain 404 rather than HTML served as JavaScript                                                                                                                                                                                                                                                                                                                                                                                           |
 | `Cache-Control` on `/assets/*`                                 | `public, max-age=31536000, immutable`: Vite puts a content hash in every file name there. `index.html` keeps Vercel's default (revalidate every time), so a deploy shows up on the next load                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `Content-Security-Policy`                                      | `script-src 'self'` (the production `index.html` has no inline script); `img-src` allows `data:`, `blob:` (photo previews), `res.cloudinary.com` (photos) and `api.cloudinary.com` (signed ID-card and evidence links); `style-src` and `font-src` allow Google Fonts (Inter, JetBrains Mono). `style-src` also needs `'unsafe-inline'`, because the toast library injects a `<style>` element. `worker-src 'self' blob:` lets photo compression run in a worker that loads its library from `/assets`. `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` |
+| `Content-Security-Policy`                                      | `script-src 'self' 'wasm-unsafe-eval'` (the production `index.html` has no inline script; `'wasm-unsafe-eval'` lets the on-device ID-card check compile Tesseract's WebAssembly, and allows nothing else: no `eval`); `img-src` allows `data:`, `blob:` (photo previews), `res.cloudinary.com` (photos) and `api.cloudinary.com` (signed ID-card and evidence links); `style-src` and `font-src` allow Google Fonts (Inter, JetBrains Mono). `style-src` also needs `'unsafe-inline'`, because the toast library injects a `<style>` element. `worker-src 'self' blob:` lets photo compression, the QR scanner and Tesseract run in workers. Tesseract's worker, cores and English model are served from the site itself under `/tesseract/` (copied there by `client/scripts/copy-tesseract.mjs` before each build), so `connect-src 'self'` is enough and nothing loads from a CDN. `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` |
 | `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` | `nosniff`; `same-origin` (nothing in the app needs a referrer sent to Cloudinary or Google); `DENY`, for browsers older than `frame-ancestors`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 The headers skip `/api/*`: the API's responses carry helmet's own headers. HTTPS and HSTS come from Vercel and Render.
@@ -334,6 +350,8 @@ The seed writes the 18 NIT JSR org units, the badge catalogue, 13 sample resourc
 
 - [ ] **Email.** A teammate registers on the deployed site with their own `@nitjsr.ac.in` address; the code should arrive within a minute. If it doesn't, Render's logs say why: `SMTP_HOST is not set, so an email was not sent`, or `Couldn't email an OTP` with the SMTP error (a connection timeout on 465/587 is Render's free-tier block, [§4](#4-smtp-email)). That teammate's account is real data on a demo-only instance ([§12](#12-the-demo_mode-decision)).
 - [ ] **Private files and the CSP.** Sign in with the password form as `newstudent@demo.campuscommons.test` / `SEED_PASSWORD` (the seeded user whose ID card is pending; there's no role button for them). Go to Verification and upload any test image (never a real ID card). Then sign in as **Admin** → Verifications → open it: the image must show. That checks Cloudinary, the signed Download API link and the CSP's `img-src` in one go. If the dialog says the file can't be shown, the console names the blocked host. Reseed afterwards.
+- [ ] **AI.** As the **Student**: Explore → **Ask in your own words** → "something to print a phone case". The FDM 3D Printer should come back with Gemini's reason, and the meter should go down by one. "AI isn't set up" means `GEMINI_API_KEY` is missing on Render; "AI couldn't answer" means Render's log has a `Gemini call failed` line with the reason.
+- [ ] **The on-device ID check and the CSP.** In the private-files step above, the picked test image shows "Checking the card on this device", then a **Device check** result. The console must show no CSP error for `wasm-unsafe-eval` or `/tesseract/`. If the check says it couldn't run, look for a 404 on `/tesseract/…` (the copy step didn't run in Vercel's build).
 - [ ] Put the Vercel URL, the role buttons, the seeded emails and `SEED_PASSWORD` in the submission's testing notes.
 
 ---

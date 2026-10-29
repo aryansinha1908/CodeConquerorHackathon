@@ -6,12 +6,13 @@
 
 ---
 
-## Implementation status (29 Oct 2026)
+## Implementation status (30 Oct 2026)
 
-- **The MVP is built, except the member's `/badges` page** (half of F-14). It is the teammate's page and shows a placeholder today. Every other route in §6.2–6.3 exists, and so does every §6.1 route except `/how-it-works`. §6.4 has the verification queue, the audit log and escalations.
-- **Not built:** `/how-it-works` (FC-01), `/admin/users`, `/admin/org-units`, Explore's date filter, the quota overview on `/profile`, and every cool-to-have feature in §3.
-- **The judge script (§11) runs in the UI except step 3**, where a student requests a badge. Use the manager's **Grant directly** or the API request in [`demo.md` §5](./demo.md#5-requesting-a-badge-without-the-badges-page). Check-in opens 15 min before the start, so run the same-day variant in [`demo.md` §3](./demo.md#3-the-judge-script-the-main-demo).
-- **Quality:** `cd client && npm test` passes 319 tests, `npm run lint` is clean, and `npm run build` succeeds with no chunk over 500 kB (the largest, React, is 311 kB). Strengths: input checks as strict as [`api.md`](./api.md) or stricter, focus moved after every action, invalidation as §8.2 says, lazy pages with vendor chunks, and Headless UI kept off the login page. Weak spots are marked **Known issue** where they apply.
+- **The MVP is built.** The member's `/badges` page (half of F-14) is the teammate's and landed on 30 Oct. Every route in §6.1–6.3 exists. §6.4 has the verification queue, the audit log and escalations.
+- **Cool-to-have, built on 30 Oct:** FC-01 How it works, FC-03 the guided tour, FC-05 the QR pass and scanner, FC-06 AI search, FC-12 the on-device ID-card check and FC-13 the AI photo comparison (§3).
+- **Not built:** `/admin/users`, `/admin/org-units`, Explore's date filter, the quota overview on `/profile`, and the other cool-to-have features in §3.
+- **The judge script (§11) runs in the UI**, step 3 included (the `/badges` page). Check-in opens 15 min before the start, so run the same-day variant in [`demo.md` §3](./demo.md#3-the-judge-script-the-main-demo).
+- **Quality:** `cd client && npm test` passes 374 tests (30 Oct), `npm run lint` is clean, and `npm run build` succeeds with no chunk over 500 kB (the largest, React, is 311 kB). Strengths: input checks as strict as [`api.md`](./api.md) or stricter, focus moved after every action, invalidation as §8.2 says, lazy pages with vendor chunks, and Headless UI kept off the login page. Weak spots are marked **Known issue** where they apply.
 - **Hosting risk:** some networks block `*.vercel.app` entirely. On campus Wi-Fi on 29 Oct, the site and other `vercel.app` sites timed out while `vercel.com` loaded. Test the judging network before the demo, and keep a hotspot or the local setup ready.
 
 **Legend:** ✅ built · 🟡 partial · ❌ not built.
@@ -60,7 +61,7 @@ What's built, and when: [`progress.md`](./progress.md). How to try each feature 
 >
 > All on a phone or a laptop, with clear reasons at every step.
 
-**Status:** 🟡 Every step runs in the browser except "gets the missing badge" in step 2: the member's `/badges` page is a placeholder. See §11, step 3, for the workarounds.
+**Status:** ✅ Every step runs in the browser, "gets the missing badge" included since the teammate's `/badges` page landed (30 Oct).
 
 **Not in the MVP** (see §3):
 - AI search
@@ -90,7 +91,7 @@ What's built, and when: [`progress.md`](./progress.md). How to try each feature 
 | F-11 | Manager: review queue **grouped by conflicting slot** | 5, 6 | 3 | 3 | Competing requests side by side with their eligibility snapshots; approve / reject / waitlist with a mandatory reason | ✅ `RequestsPage.jsx` + `ConflictGroupCard.jsx`, polled every 30 s, with `ReasonDialog` quick picks |
 | F-12 | Manager: handovers + **return confirmation** | 7–9 | 3 | 2 | Today's check-ins and returns; check-in vs check-out photos side by side; "All good" or "Report issue" | ✅ `HandoversPage.jsx` (three lists, overdue highlighted) and `ReturnConfirmPage.jsx` (reports side by side, the manager's own checklist, the timeline) |
 | F-13 | Incidents: report, list, thread, resolve | 9 | 2 | 2 | Pre-filled from the booking; the resolve dialog needs an outcome and a rationale | ✅ `features/incidents/`: `?bookingId=` or `?resourceId=` pre-fill, filterable lists (manage and admin), thread, `ResolveDialog` |
-| F-14 | Badges: my badges, request; manager queue and grant | 2, 4 | 2 | 2 | A fix link in the eligibility checklist deep-links here | 🟡 Manager side ✅ (`BadgeRequestsPage.jsx`: queue, evidence through a signed link, grant by email). **Member side ❌:** `/badges` is a placeholder (`pages/Placeholders.jsx`, the teammate's), so the fix link lands on it. `/profile` lists the user's badges |
+| F-14 | Badges: my badges, request; manager queue and grant | 2, 4 | 2 | 2 | A fix link in the eligibility checklist deep-links here | ✅ Manager side (`BadgeRequestsPage.jsx`: queue, evidence through a signed link, grant by email). Member side: the teammate's `/badges` page (`features/badges/`, 30 Oct), where the fix link lands. `/profile` lists the user's badges |
 | F-15 | Admin: verification queue, users and roles, audit log | 10 | 2 | 2 | ID image opens through a short-lived signed URL; audit table with filters | 🟡 Verification queue ✅ and audit log ✅. **Users and roles ❌** (`/admin/users`): `GET /admin/users` exists, but only the audit page's actor search uses it |
 | F-16 | Notification bell + centre | 6–9 | 2 | 1 | Polls `unread-count` every 30 s; click-through to the related page | ✅ `NotificationBell.jsx` (latest 5, polls while the tab is visible) and `NotificationsPage.jsx` (unread filter, optimistic mark read, mark all read) |
 | F-17 | Fair-usage quota meters | 6 | 3 | 1 | "4 of 6 h used this week" on resource detail and profile | 🟡 Resource detail ✅ (`QuotaMeter.jsx`). Profile ❌: no quota overview |
@@ -104,19 +105,19 @@ What's built, and when: [`progress.md`](./progress.md). How to try each feature 
 
 | ID | Feature | Wow | Diff | Priority | Notes (backend dependency) | Status |
 |---|---|:-:|:-:|:-:|---|---|
-| FC-01 | **"How allocation works" transparency page** | 3 | 1 | P1 | Public page explaining caps, FIFO waitlist, no-show rules and human review. Cheap fairness points | ❌ No `/how-it-works` route. The path falls through to `/explore`, or to `/login` when signed out |
+| FC-01 | **"How allocation works" transparency page** | 3 | 1 | P1 | Public page explaining caps, FIFO waitlist, no-show rules and human review. Cheap fairness points | ✅ `/how-it-works` (`pages/HowItWorksPage.jsx`), public and static: 12 sections, including the QR pass and what the AI sees and never sees. Linked from the login page, the footer and the account menu |
 | FC-02 | **Audit integrity badge** | 4 | 1 | P1 | "✔ Audit chain verified: 1,284 entries" on the admin audit page (C-02) | ❌ The audit API leaves `prevHash` / `hash` out |
-| FC-03 | **Guided judge tour** | 3 | 1 | P1 | `react-joyride` walkthrough of the golden path for each demo role | ❌ `docs/demo.md` §3 is the written version |
+| FC-03 | **Guided judge tour** | 3 | 1 | P1 | `react-joyride` walkthrough of the golden path for each demo role | ✅ Built with `driver.js` instead (`features/tour/`): a tour per page (Explore, resource, booking, Manage pages, verifications) on `data-tour` targets, from the **?** in the header, offered once per role. It stops when the page changes, and its text is escaped (driver.js renders HTML). `docs/demo.md` §3 is still the full walkthrough |
 | FC-04 | **Smart alternatives panel** | 4 | 1 | P1 | On `SLOT_TAKEN`: "Next free: today 4–6 pm · Similar: GPU Workstation #2" (C-03) | ❌ `SLOT_TAKEN` offers the waitlist only |
-| FC-05 | **QR pass + QR scanner** | 4 | 2 | P1 | Borrower shows the QR (`qrcode.react`); manager scans it (`html5-qrcode`) to check in or out (C-04) | ❌ |
-| FC-06 | **AI "Describe what you need" search** | 5 | 2 | P1 | Query → ranked results with "why this matches"; **"AI searches left today: 3/5"** meter; when the quota is out or AI is down, falls back to normal search with a friendly note (C-05) | ❌ No AI features in the client. The incident page shows an AI summary card only if the server ever sends one |
+| FC-05 | **QR pass + QR scanner** | 4 | 2 | P1 | Borrower shows the QR (`qrcode.react`); manager scans it (`html5-qrcode`) to check in or out (C-04) | ✅ With `qrcode` and `qr-scanner` instead. The pass card on the booking page refreshes every minute, counts down on the server's clock, shows a code read letter by letter, and turns "Verified" by itself (a light status poll). `/manage/scan` scans with the camera (with a permission check first) or takes the typed code, then opens the next step |
+| FC-06 | **AI "Describe what you need" search** | 5 | 2 | P1 | Query → ranked results with "why this matches"; **"AI searches left today: 3/5"** meter; when the quota is out or AI is down, falls back to normal search with a friendly note (C-05) | ✅ Explore's **Ask in your own words** switch (`?ask=` in the URL; `features/resources/components/AiAskForm.jsx`, `AiResults.jsx`): picks with **Gemini's reason** and whether you can book them, the page's filters applied to the picks, "4 of 5 AI requests left today", and the keyword fallback for the same words. A question from a link waits for **Ask Gemini**. The incident page's AI summary card still waits for C-14 |
 | FC-07 | **"Why am I #3?" priority explainer** | 4 | 2 | P1 | Score breakdown bars for waitlisted users; managers see the ranking as a recommendation (C-06) | ❌ The waitlist position is shown, without a breakdown |
 | FC-08 | Extension request UI | 2 | 1 | P1 | From booking detail; shows a conflict result (C-07) | ❌ |
 | FC-09 | Reliability card on profile | 3 | 1 | P1 | On-time returns, no-shows, strikes, with the reason for each (C-09) | ❌ `/profile` shows only the strike count and any suspension |
 | FC-10 | Real-time toasts and live status | 3 | 2 | P2 | `socket.io-client`; invalidates the matching queries on events (C-10) | ❌ The app polls instead (§8.2) |
 | FC-11 | WhatsApp opt-in settings | 2 | 1 | P2 | Phone in E.164 format, explicit consent checkbox, test-message button (C-12) | ❌ |
-| FC-12 | **In-browser ID-card OCR check** | 4 | 3 | P2 | `tesseract.js` reads the roll number **on the device** and compares it with the email-derived one: "✔ Roll number matches your email". The image is never sent to an AI | ❌ |
-| FC-13 | AI before/after diff view | 5 | 3 | P2 | Highlights suggested differences on the return-confirmation screen, clearly labelled "AI suggestion" (C-15) | ❌ Reports are shown side by side, without a diff |
+| FC-12 | **In-browser ID-card OCR check** | 4 | 3 | P2 | `tesseract.js` reads the roll number **on the device** and compares it with the email-derived one: "✔ Roll number matches your email". The image is never sent to an AI | ✅ `features/verification/idCardCheck.js` and `DeviceCheck.jsx`: Tesseract 7, self-hosted under `/tesseract/`, checks the institute's name, the roll number (look-alike characters allowed), the account's name and the year, and shows **Device check 3/4** with what to fix. Only yes/no answers go with the upload; the admin's queue shows them as a hint, and **View ID → Check on this device** runs the same check in the admin's browser |
+| FC-13 | AI before/after diff view | 5 | 3 | P2 | Highlights suggested differences on the return-confirmation screen, clearly labelled "AI suggestion" (C-15) | ✅ On the return check, **Compare with AI** (`features/manage/components/AiCompareCard.jsx`): a verdict (possible new damage, none spotted, or couldn't compare), a summary and up to six differences with severity and checklist item, labelled "AI suggestion" and "a person decides". The photos stay side by side above it; there are no drawn highlights |
 | FC-14 | Analytics dashboard | 4 | 3 | P2 | `Recharts`: utilisation by resource, **underused resources list**, hour × weekday demand heatmap, Gini gauge (C-16) | ❌ `/manage` shows count cards only |
 | FC-15 | Calendar view with drag-select | 3 | 3 | P2 | `react-big-calendar` week view for picking a slot | ❌ The 7-day `AvailabilityGrid` takes a click for the start and another for the end |
 | FC-16 | Training micro-quiz | 4 | 2 | P2 | 5 questions → instant badge for self-serve badges (C-13) | ❌ |
@@ -180,7 +181,7 @@ client/
 ```
 
 **As built** (🟡 the layout differs from the plan above):
-- `pages/` holds only `ExplorePage`, `ResourceDetailPage` and `Placeholders` (the `/badges` placeholder). Every other page lives in its feature folder (e.g. `features/bookings/MyBookingsPage.jsx`) and is lazy-loaded through `components/LazyPages.jsx`.
+- `pages/` holds `ExplorePage`, `ResourceDetailPage`, `HowItWorksPage`, the teammate's `HomePage`, and `Placeholders`. Every other page lives in its feature folder (e.g. `features/bookings/MyBookingsPage.jsx`) and is lazy-loaded through `components/LazyPages.jsx`.
 - `features/` has `auth`, `verification`, `resources` (with the eligibility checklist), `bookings` (with the condition-report steps), `incidents`, `notifications`, `manage` (dashboard, listing form, badge queue), `admin` (verification queue, audit log), `profile` and `uploads`. There are no `eligibility/`, `condition/`, `badges/` or `audit/` folders, and no per-feature `schemas.js`.
 - `app/layouts/` has `AppLayout`, `ManageLayout` and `AdminLayout`. The auth pages use `features/auth/AuthLayout.jsx` instead of a `PublicLayout`.
 - `components/ui/` has Badge, Button, Card, ConfirmDialog, Dialog, EmptyState, ErrorBoundary, ErrorState, Input, Pagination, ReasonDialog, Select, Skeleton and StatusBadge. There is no Tabs or DataTable. `components/` also holds `PhotoUploader`, `BookingTimeline`, `NotificationBell`, `UserMenu`, `AccountFace`, `Motion` and `LazyPages`.
@@ -198,7 +199,7 @@ client/
 | `/login` | Login | Email and password; **demo role buttons** (DEMO_MODE); lockout countdown on 429 | `POST /auth/login`, `POST /auth/demo-login` | ✅ The buttons need `GET /auth/demo-config`, which is fetched once with no retry (F-03) |
 | `/register` | Register | Name, email (live `@nitjsr.ac.in` check + "Detected" chip), password strength | `POST /auth/register` | ✅ The "Detected" chip is live. The domain check is the server's, shown after submit |
 | `/verify-otp` | OTP | 6-box input with paste support; resend with countdown | `POST /auth/verify-otp`, `POST /auth/resend-otp` | ✅ Submits itself on the 6th digit |
-| `/how-it-works` | Transparency (FC-01) | Fair-use rules, waitlist, human review, privacy | static | ❌ No route |
+| `/how-it-works` | Transparency (FC-01) | Fair-use rules, waitlist, human review, privacy | static | ✅ Public, no API calls |
 
 ### 6.2 Member (logged in)
 
@@ -211,7 +212,7 @@ client/
 | `/bookings/:id` | Booking detail | StatusBadge, decision reason, state-aware action bar (cancel / check in / check out / report issue), condition reports, **BookingTimeline** | `GET /bookings/:id`, `/timeline`, `POST /bookings/:id/cancel` | ✅ Before the check-in window opens (15 min before the start), it says when it opens |
 | `/bookings/:id/check-in` | Check-in wizard | ① checklist ② photos ③ confirm | `POST /uploads/images`, `POST /bookings/:id/check-in` | ✅ |
 | `/bookings/:id/check-out` | Check-out wizard | Same as check-in; shows check-in photos for reference | `POST /bookings/:id/check-out` | ✅ |
-| `/badges` | Badges | My badges (active, requested, expired), catalogue by unit, request dialog with optional evidence | `GET /badges`, `/badges/mine`, `POST /badges/:id/requests` | ❌ Placeholder (`pages/Placeholders.jsx`, imported in `components/LazyPages.jsx`), left for the teammate's page. The header's Badges link and the checklist's fix links lead to it. The API is ready |
+| `/badges` | Badges | My badges (active, requested, expired), catalogue by unit, request dialog with optional evidence | `GET /badges`, `/badges/mine`, `POST /badges/:id/requests` | ✅ The teammate's page (`features/badges/BadgesPage.jsx`, 30 Oct). The header's Badges link and the checklist's fix links lead to it |
 | `/incidents/new` | Report incident | Type, severity, description, photos; `?bookingId=` pre-fill | `POST /incidents` | ✅ Also takes `?resourceId=` |
 | `/incidents/:id` | Incident detail | Thread, status, resolution card | `GET /incidents/:id`, `POST /incidents/:id/comments` | ✅ Resolving is on this page too (`ResolveDialog`) |
 | `/notifications` | Notifications | List, mark read, mark all read | `GET /notifications`, `PATCH …/read`, `PATCH …/read-all` | ✅ Has an unread filter |
@@ -228,6 +229,7 @@ client/
 | `/manage/resources/new` · `/:id/edit` | Listing form | Sections: Basics · Availability (weekly hours editor + blackouts) · Eligibility (member types, departments, badges, approval mode) · Limits · Condition checklist · Preview | `POST` / `PATCH /resources` | ✅ New listings start with Mon–Fri 09:00–17:00, every member type and manual approval |
 | `/manage/requests` | Review queue | **Conflict groups**: one card per contested slot listing all requests with requester (name, member type, department), purpose, eligibility snapshot; actions with **ReasonDialog** | `GET /bookings/manage`, `POST …/approve \| reject \| waitlist` | ✅ Polled every 30 s |
 | `/manage/handovers` | Today | Three lists: starting soon, in use (overdue highlighted), awaiting return confirmation | `GET /bookings/manage?status=…` | ✅ |
+| `/manage/scan` | Scan pass (FC-05) | Camera scanner (after a permission check) or the typed 6-character code; the borrower, slot and a button for the next step | `POST /bookings/scan` | ✅ Added 30 Oct |
 | `/manage/returns/:bookingId` | Confirm return | Check-in vs check-out photos and checklists side by side; manager's own checklist; "All good" or "Report issue" (opens the incident fields) | `POST /bookings/:id/confirm-return` | ✅ Also shows the booking's timeline |
 | `/manage/incidents` · `/:id` | Incidents | Filterable list; detail with resolve dialog (outcome + rationale) | `GET /incidents`, `POST /incidents/:id/resolve` | ✅ |
 | `/manage/badges` | Badge requests | Queue with evidence preview; grant directly to a user | `GET /badge-requests`, `PATCH /badge-requests/:id`, `POST /badges/:id/grant` | ✅ Evidence opens through a short-lived signed link. **Grant directly** takes the member's email |
@@ -250,7 +252,7 @@ client/
 
 | Component | Used in | Behaviour | Status |
 |---|---|---|---|
-| `EligibilityChecklist` | Resource detail, booking panel, review queue | Renders `[{rule, passed, message, fixHint}]`; failed rules get a fix link (e.g. → `/badges?request=3d-printing-basics`) | ✅ `features/resources/components/`, used on the resource page and in the booking panel. The review queue uses its own `EligibilitySnapshot`. The badge fix link lands on the `/badges` placeholder |
+| `EligibilityChecklist` | Resource detail, booking panel, review queue | Renders `[{rule, passed, message, fixHint}]`; failed rules get a fix link (e.g. → `/badges?request=3d-printing-basics`) | ✅ `features/resources/components/`, used on the resource page and in the booking panel. The review queue uses its own `EligibilitySnapshot`. The badge fix link lands on `/badges` |
 | `AvailabilityGrid` | Resource detail, booking panel | 7-day × time-slot grid: open, busy, blackout, closed; keyboard navigable; click to select a range | ✅ `role="grid"` with a roving tab stop, arrow keys, Home / End and Page Up / Down. Click the start, then the end. Busy cells show how many units are in use, never who holds them |
 | `BookingPanel` | Resource detail | Date and time pickers aligned to `slotMinutes`, purpose field, live pre-check result, submit / join-waitlist | ✅ Day and time `<select>` lists on the slot grid instead of date pickers, kept in step with the grid. Purpose 10–300 characters with a counter |
 | `StatusBadge` | Everywhere | Colour + icon + label per state (§10.2) | ✅ `components/ui/StatusBadge.jsx`, styles in `lib/bookingStatus.js` |
@@ -419,7 +421,7 @@ Zod schemas in `lib/schemas/` mirror the server rules in [`backend.md` §7](./ba
 |---|---|---|---|---|
 | 1 | **Manager** | Manage → Resources → New: "FDM 3D Printer #2" (DIC), requires *3D Printing Basics*, manual approval, max 4 h, 6 h/week | Resource listed; audit entry `resource.created` | ✅ Manage → Unit Resources → New resource. The form starts with Mon–Fri 09:00–17:00, so on a Saturday, or outside those hours, add today's hours for the same-day run |
 | 2 | **Student** | Explore → search "3D printer" → open it | Eligibility checklist: ❌ *Missing badge: 3D Printing Basics → Request it* | ✅ |
-| 3 | Student | Click the fix link → request the badge | Badge shows "Requested" | ❌ The fix link opens the `/badges` placeholder. Instead, request the badge over the API ([`demo.md` §5](./demo.md#5-requesting-a-badge-without-the-badges-page)), or skip to step 4 and use **Grant directly** |
+| 3 | Student | Click the fix link → request the badge | Badge shows "Requested" | ✅ The fix link opens the teammate's `/badges` page (30 Oct): **Request Badge**, with a note and optional evidence. Or over the API ([`demo.md` §5](./demo.md#5-requesting-a-badge-through-the-api)) |
 | 4 | **Manager** | Manage → Badges → approve | Student gets a notification; the checklist turns ✅ | ✅ Approve, or **Grant directly** → *3D Printing Basics* → `student@demo.campuscommons.test`. The Student's checklist turns ✅ when the page is reloaded or refocused |
 | 5 | Student | Book tomorrow 10:00–12:00 with a purpose | Live pre-check all ✅ → status **Awaiting review** | 🟡 Works, but see **Timing** above. **Known issue:** afterwards, the checklist and quota on the page can stay stale until refocus (§8.2) |
 | 6 | **Student 2** | Book an overlapping slot | "Slot held by an earlier request" → joins as **Waitlisted #1** | ✅ "Every rule passes, but an earlier request holds this slot. You can join the waitlist as #1." |
