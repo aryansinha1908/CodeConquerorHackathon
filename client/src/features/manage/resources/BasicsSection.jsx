@@ -185,7 +185,7 @@ export function BasicsSection({
         value={form.description}
         onChange={set('description')}
         maxLength={DESCRIPTION_MAX}
-        hint="What it does and what to bring. Searched by Explore."
+        hint="What it does and what to bring. Searched by Explore, and read by Google Gemini for AI search: no names, phone numbers or emails."
         error={errors.description}
       />
 

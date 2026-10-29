@@ -12,6 +12,8 @@ export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 // architecture.md §15.1 asks for 8 s; image comparisons pass their own, longer timeout.
 const DEFAULT_TIMEOUT_MS = 12_000;
+// Each feature's answer is a few hundred tokens; the cap stops a question that asks for an essay.
+const DEFAULT_MAX_OUTPUT_TOKENS = 1024;
 
 let override = null;
 
@@ -44,16 +46,31 @@ function toPart(part) {
 // this through withAiQuota(), which turns that 429 into a 503 too. Anything else (timeouts, 5xx, a
 // refusal, JSON that doesn't parse) is a 503 the member can act on. Only the HTTP status and Google's
 // error status are logged: an error body can quote the prompt, which may hold a member's question.
-function unavailable(reason, err) {
+//
+// `reachedAi` says whether Google worked on the request (a timeout, a 5xx, a blocked, empty or broken
+// answer). withAiQuota() charges those: refunding them would let anyone who can make Gemini fail (a
+// question asking for a very long answer, say) retry for free until the campus-wide cap is gone. A
+// request Google never processed (no connection, a 4xx other than 429) is refunded.
+function unavailable(reason, err, { reachedAi }) {
   log.warn({ reason, status: err?.status, googleStatus: err?.googleStatus }, "Gemini call failed");
-  return new AiUnavailableError("AI couldn't answer just now. Regular search still works.", { cause: err });
+  const failure = new AiUnavailableError("AI couldn't answer just now. Regular search still works.", err ? { cause: err } : undefined);
+  failure.reachedAi = reachedAi;
+  return failure;
 }
 
 /**
  * One Gemini request that must answer JSON matching `schema` (Gemini's OpenAPI subset: OBJECT, ARRAY,
  * STRING, INTEGER, BOOLEAN). parts: [{ text } | { image: { mimeType, data } }]. → the parsed object.
+ * An answer cut off at maxOutputTokens doesn't parse, so it is a 503 too.
  */
-export async function generateJson({ system, parts, schema, temperature = 0.2, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+export async function generateJson({
+  system,
+  parts,
+  schema,
+  temperature = 0.2,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+}) {
   if (override) return override.generateJson({ system, parts, schema, temperature });
   requireAiConfigured();
 
@@ -64,6 +81,7 @@ export async function generateJson({ system, parts, schema, temperature = 0.2, t
       responseMimeType: "application/json",
       responseSchema: schema,
       temperature,
+      maxOutputTokens,
       // Flash models think before answering unless told not to; these tasks don't need it, and the
       // thinking would eat the timeout. Other models keep their default.
       ...(/flash/.test(model) && { thinkingConfig: { thinkingBudget: 0 } }),
@@ -80,7 +98,8 @@ export async function generateJson({ system, parts, schema, temperature = 0.2, t
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
-    throw unavailable(err?.name === "TimeoutError" ? "timeout" : "network", err);
+    const timeout = err?.name === "TimeoutError";
+    throw unavailable(timeout ? "timeout" : "network", err, { reachedAi: timeout });
   }
 
   if (!res.ok) {
@@ -91,16 +110,20 @@ export async function generateJson({ system, parts, schema, temperature = 0.2, t
       .catch(() => null);
     const err = Object.assign(new Error(`Gemini answered HTTP ${res.status}`), { status: res.status, googleStatus });
     if (res.status === 429) throw err;
-    throw unavailable(`http_${res.status}`, err);
+    throw unavailable(`http_${res.status}`, err, { reachedAi: res.status >= 500 });
   }
 
   const answer = await res.json().catch(() => null);
   const candidate = answer?.candidates?.[0];
   const text = candidate?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  if (!text) throw unavailable(`empty:${candidate?.finishReason ?? answer?.promptFeedback?.blockReason ?? "none"}`);
+  if (!text) {
+    const why = candidate?.finishReason ?? answer?.promptFeedback?.blockReason ?? "none";
+    throw unavailable(`empty:${why}`, null, { reachedAi: true });
+  }
   try {
     return JSON.parse(text);
-  } catch (err) {
-    throw unavailable("bad_json", err);
+  } catch {
+    // No cause: a SyntaxError's message quotes the start of the model's text.
+    throw unavailable("bad_json", null, { reachedAi: true });
   }
 }

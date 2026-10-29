@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import http from '../../lib/http';
 import { retryReads } from '../../lib/errors';
 import { readPage } from '../../lib/paging';
 import { toDate } from '../../lib/time';
+import { AI_QUESTION_MAX, AI_QUESTION_MIN, aiKeys, isAiQuotaOut, isAiUnavailable, storeAiQuota } from '../ai/api';
 import { checkBooking } from '../bookings/api';
 import { getActiveOrgUnits, orgUnitKeys } from '../verification/api';
 import { RESOURCE_CATEGORIES } from './format';
@@ -88,6 +89,39 @@ export function writeExploreFilters(current, patch = {}) {
   return params;
 }
 
+/**
+ * /explore's ?ask (the AI search question) → the question, trimmed, at most 200 characters; '' for
+ * one under 3 characters, which the server would refuse (a hand-made link).
+ */
+export function readAskQuestion(searchParams) {
+  const question = String(searchParams?.get?.('ask') ?? '').trim().slice(0, AI_QUESTION_MAX).trim();
+  return question.length >= AI_QUESTION_MIN ? question : '';
+}
+
+/** The URL search params with the AI question set (and the keyword search off), or cleared. */
+export function writeAskQuestion(current, question) {
+  const params = new URLSearchParams(current);
+  const text = String(question ?? '').trim().slice(0, AI_QUESTION_MAX).trim();
+  if (text) params.set('ask', text);
+  else params.delete('ask');
+  params.delete('q');
+  params.delete('page');
+  return params;
+}
+
+/**
+ * The category, unit and "only what I can book" filters, applied to the AI's picks on this device:
+ * the AI search answers the question about the whole catalogue, the filters then narrow it.
+ */
+export function filterAiPicks(items, filters = {}) {
+  return (Array.isArray(items) ? items : []).filter(
+    (item) =>
+      (!filters.category || item.category === filters.category) &&
+      (!filters.orgUnit || String(item.orgUnit?._id ?? item.orgUnit) === filters.orgUnit) &&
+      (!filters.eligibleOnly || item.eligible === true)
+  );
+}
+
 /** Whether any filter (not the page) is set. */
 export function hasExploreFilters(filters) {
   return Boolean(filters?.q?.trim() || filters?.category || filters?.orgUnit || filters?.eligibleOnly);
@@ -131,6 +165,14 @@ export async function getResourceEligibility(id, slot = null) {
   const end = toIso(slot?.end);
   const params = start && end ? { start, end } : undefined;
   return unwrap(await http.get(path(id, '/eligibility'), params ? { params } : undefined));
+}
+
+/**
+ * POST /resources/ai-search { query } → data { items: [Card + reason + eligible], quota, cached }.
+ * 400 for a question under 3 or over 200 characters, 429 AI_QUOTA_EXCEEDED, 503 AI_UNAVAILABLE.
+ */
+export async function aiSearchResources(query) {
+  return unwrap(await http.post('/resources/ai-search', { query }));
 }
 
 // ── Query keys (frontend.md §8.2) ─────────────────────────────────────────────
@@ -178,6 +220,44 @@ export function useResources(filters = {}, options = {}) {
       const { page: _previousPage, ...previousRest } = previousQuery?.queryKey?.[1] ?? {};
       return JSON.stringify(previousRest) === sameFilters ? previous : undefined;
     },
+    ...options,
+  });
+}
+
+/**
+ * The AI search for `question` under ['ai', 'search', question]: asked once and kept (never refetched
+ * on focus, reconnect, remount or a resource change, and not retried: each request can spend the
+ * viewer's AI quota). Off without a question of 3+ characters, or with enabled: false. The answer's
+ * quota updates the meter.
+ *
+ * When the AI can't answer (429 AI_QUOTA_EXCEEDED, 503 AI_UNAVAILABLE) the query succeeds with
+ * { fallback: error }: the page shows the keyword search instead, and that stays on screen while
+ * "Ask again" refetches (an errored query would go back to pending) and after Back (an errored query
+ * would be asked again on mount). Any other failure is an error.
+ */
+export function useAiSearch(question, { enabled = true, ...options } = {}) {
+  const queryClient = useQueryClient();
+  const text = String(question ?? '').trim();
+  return useQuery({
+    queryKey: aiKeys.search(text),
+    queryFn: async () => {
+      try {
+        const res = await aiSearchResources(text);
+        storeAiQuota(queryClient, res.data?.quota);
+        return res;
+      } catch (err) {
+        if (isAiQuotaOut(err)) queryClient.invalidateQueries({ queryKey: aiKeys.quota });
+        if (isAiQuotaOut(err) || isAiUnavailable(err)) return { fallback: err };
+        throw err;
+      }
+    },
+    enabled: enabled && text.length >= AI_QUESTION_MIN,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     ...options,
   });
 }

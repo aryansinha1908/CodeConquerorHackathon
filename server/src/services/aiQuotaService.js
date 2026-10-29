@@ -4,7 +4,7 @@
 //
 // Flow of withAiQuota(): circuit open → 503; cached answer → free; reserve quota (atomic Lua: burst,
 // user daily, global per minute, global daily) → 429 when denied; call Gemini; cache the answer.
-// A failed call is refunded to the user. A Gemini 429 also opens the circuit for 10 minutes.
+// A failed call is refunded to the user, unless Google worked on it. A Gemini 429 also opens the circuit for 10 minutes.
 //
 // Limits come from env (read on each call, so dotenv order doesn't matter). Google no longer
 // publishes fixed free-tier numbers: set AI_GLOBAL_DAILY_LIMIT below what AI Studio shows.
@@ -299,7 +299,9 @@ export async function withAiQuota({
       try {
         return await call();
       } catch (err) {
-        await reservation.refund();
+        // Refunded unless Google worked on it (err.reachedAi, config/gemini.js): a member who can
+        // make Gemini fail must not get unlimited free tries against the shared caps.
+        if (!err?.reachedAi) await reservation.refund();
         if (isGeminiRateLimit(err)) {
           await openAiCircuit();
           throw new AiUnavailableError(

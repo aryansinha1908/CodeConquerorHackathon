@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Award, Building2, Clock, MapPin, Zap } from 'lucide-react';
+import { ArrowRight, Award, Building2, Clock, MapPin, Sparkles, Zap } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
 import { hoverLift } from '../../../lib/motion';
 import {
@@ -20,14 +20,17 @@ import {
 // the server wrote ("Mon–Sat 09:00–17:00"). The whole card opens the detail page: the title is the
 // card's one link, stretched over the card by its ::after box, so a click anywhere lands on it and
 // a screen reader or Tab meets one link per card, named by the title. "View and book" only looks
-// like a button (aria-hidden); no button sits inside a link.
+// like a button (aria-hidden); no button sits inside a link. An AI search pick (POST
+// /resources/ai-search) also gets `reason`, the model's note on why it fits (labelled as Gemini's: it
+// is model text, cached and shown to everyone who asks the same thing), and `eligible`, whether the
+// viewer passes the rules that don't need a time.
 
 const ctaClass =
   'inline-flex items-center justify-center gap-1.5 font-bold font-mono tracking-tight border-2 border-[#1a1a1a] ' +
   'px-3 py-2 min-h-[40px] text-xs rounded-md bg-[#c0392b] text-white shadow-[3px_3px_0px_0px_#1a1a1a] ' +
   'transition-all group-hover:shadow-[1px_1px_0px_0px_#1a1a1a] group-hover:translate-x-[2px] group-hover:translate-y-[2px]';
 
-export function ResourceCard({ resource, headingLevel = 'h3' }) {
+export function ResourceCard({ resource, headingLevel = 'h3', reason = null, eligible = null }) {
   const Heading = headingLevel;
   const href = `/resources/${encodeURIComponent(resource._id)}`;
   const risk = riskView(resource.riskLevel);
@@ -62,6 +65,16 @@ export function ResourceCard({ resource, headingLevel = 'h3' }) {
           <Badge variant={risk.variant} size="sm">
             {risk.label}
           </Badge>
+          {eligible === true && (
+            <Badge variant="green" size="sm">
+              You can book this
+            </Badge>
+          )}
+          {eligible === false && (
+            <Badge variant="amber" size="sm">
+              Needs something first
+            </Badge>
+          )}
           {resource.status && resource.status !== 'active' && (
             <Badge variant={status.variant} size="sm">
               {status.label}
@@ -92,6 +105,16 @@ export function ResourceCard({ resource, headingLevel = 'h3' }) {
 
         {resource.description && (
           <p className="text-xs text-[#1a1a1a]/80 leading-relaxed line-clamp-2">{resource.description}</p>
+        )}
+
+        {reason && (
+          <div className="text-xs p-2.5 rounded-lg border-2 border-[#1a1a1a] bg-[#fdf3c4]">
+            <p className="font-bold flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#a93226]" aria-hidden="true" />
+              Gemini&apos;s reason
+            </p>
+            <p className="mt-0.5 leading-relaxed break-words">{reason}</p>
+          </div>
         )}
 
         <dl className="grid grid-cols-1 gap-1.5 text-xs p-2.5 rounded-lg bg-[#f5f0e8] border border-[#1a1a1a]/25">

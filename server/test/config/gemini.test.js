@@ -106,6 +106,36 @@ describe("generateJson", () => {
     await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), isUnavailable);
   });
 
+  test("a failure Google worked on is marked reachedAi (charged); one it never processed isn't (refunded)", async () => {
+    const reached = (expected) => (err) => err.status === 503 && err.reachedAi === expected;
+    for (const [status, body] of [[500, "oops"], [200, { candidates: [{ finishReason: "SAFETY" }] }], [200, { candidates: [{ content: { parts: [{ text: "not json" }] } }] }]]) {
+      answer(status, body);
+      await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(true));
+    }
+    globalThis.fetch = async () => {
+      throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    };
+    await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(true));
+    answer(400, { error: { status: "INVALID_ARGUMENT" } });
+    await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(false));
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(false));
+  });
+
+  test("the answer's length is capped, and broken JSON's error doesn't carry the model's text", async () => {
+    answer(200, ok({ ok: true }));
+    await generateJson({ parts: [{ text: "x" }], schema: SCHEMA, maxOutputTokens: 300 });
+    assert.equal(calls[0].body.generationConfig.maxOutputTokens, 300);
+    calls = [];
+    await generateJson({ parts: [{ text: "x" }], schema: SCHEMA });
+    assert.ok(calls[0].body.generationConfig.maxOutputTokens > 0, "a default cap");
+    answer(200, { candidates: [{ content: { parts: [{ text: "Here is the secret plan" }] } }] });
+    const err = await generateJson({ parts: [{ text: "x" }], schema: SCHEMA }).catch((e) => e);
+    assert.equal(JSON.stringify({ message: err.message, cause: String(err.cause ?? "") }).includes("Here is"), false);
+  });
+
   test("without a key nothing is sent, and the answer is 503", async () => {
     delete process.env.GEMINI_API_KEY;
     answer(200, ok({ ok: true }));

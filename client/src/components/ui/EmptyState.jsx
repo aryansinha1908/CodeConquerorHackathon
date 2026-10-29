@@ -29,7 +29,7 @@ export function EmptyState({
           variant="outline"
           size="sm"
           onClick={onAction}
-          className="mt-2 text-xs"
+          className="mt-2 text-xs min-h-[40px]"
         >
           {actionLabel}
         </Button>

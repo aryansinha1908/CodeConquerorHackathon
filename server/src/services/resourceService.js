@@ -199,8 +199,8 @@ function listFilter(
 }
 
 // The member rules of the detail checklist, run over the shared list for one viewer: one query for
-// their badges and one aggregate for their active bookings per resource.
-async function eligibleFor(viewer, resources, now) {
+// their badges and one aggregate for their active bookings per resource. Also used by AI search.
+export async function eligibleFor(viewer, resources, now) {
   if (!resources.length) return [];
   const [userBadges, counts] = await Promise.all([
     UserBadge.find(
@@ -230,6 +230,15 @@ async function eligibleFor(viewer, resources, now) {
         activeCount: active.get(String(resource._id)) ?? 0,
       }).eligible,
   );
+}
+
+// The cards of every resource matching `filters` (listFilter's input), by title, at most `limit`, in the
+// list's shape (populated refs, openHours, plain JSON). For AI search's catalogue.
+export async function listItems(filters, { limit }) {
+  const docs = await withRefs(
+    Resource.find(listFilter(filters, undefined)).select(CARD_FIELDS).sort({ title: 1, _id: 1 }).limit(limit),
+  );
+  return plain(docs.map(withOpenHours));
 }
 
 // GET /resources. query: { q, category, orgUnit, memberType, date, status, page, limit, eligibleOnly }

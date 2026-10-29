@@ -280,6 +280,17 @@ describe("withAiQuota", () => {
     assert.equal(call.calls, 1, "the failure wasn't cached");
   });
 
+  test("a failure after Gemini got the request is charged (no free retries), and not cached", async () => {
+    const reached = async () => {
+      throw Object.assign(new AiUnavailableError("AI couldn't answer just now."), { reachedAi: true });
+    };
+    await assert.rejects(search({ q: "drone" }, reached), AiUnavailableError);
+    assert.equal((await getAiQuota("u1", NOW)).used, 1, "a timeout, a blocked or broken answer: Google did the work");
+    const call = gemini({ resourceIds: ["r9"] });
+    await search({ q: "drone" }, call);
+    assert.equal(call.calls, 1, "the failure wasn't cached");
+  });
+
   test("a Gemini 429 opens the circuit for everyone for 10 minutes", async () => {
     const limited = async () => {
       throw Object.assign(new Error("RESOURCE_EXHAUSTED"), { status: 429 });

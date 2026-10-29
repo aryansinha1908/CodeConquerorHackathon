@@ -6,7 +6,8 @@
 import express from "express";
 import { verifyAuth } from "../middleware/auth.js";
 import { blockSuspended } from "../middleware/blockSuspended.js";
-import { generalLimiter } from "../middleware/rateLimit.js";
+import { generalLimiter, visitorKey } from "../middleware/rateLimit.js";
+import { aiSearchResources } from "../services/aiSearchService.js";
 import { sendData, sendList } from "../lib/respond.js";
 import {
   createResource,
@@ -37,6 +38,13 @@ router.post("/", ...write, async (req, res) => {
     requestId: req.id,
   });
   sendData(req, res, resource, { status: 201 });
+});
+
+// AI search (C-05): { query } → { items: cards with reason and eligible, quota, cached, capped }. For
+// verified members who aren't suspended. Capped by the AI quota (429 AI_QUOTA_EXCEEDED) and off without
+// a key or Redis (503 AI_UNAVAILABLE); regular search carries on either way. Static path, so before /:id.
+router.post("/ai-search", ...write, async (req, res) => {
+  sendData(req, res, await aiSearchResources(req.user.id, req.body ?? {}, { network: visitorKey(req) }));
 });
 
 router.get("/:id", ...read, async (req, res) => {
