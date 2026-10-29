@@ -24,6 +24,8 @@ import {
   invalid,
   notFound,
 } from "../lib/serviceError.js";
+import { fileTypeFromBuffer } from "file-type";
+import { discardBody, readCapped } from "../lib/readCapped.js";
 import { MEMBER_TYPES } from "../models/enums.js";
 import { OrgUnit, User } from "../models/index.js";
 import { requireAdmin } from "./access.js";
@@ -66,6 +68,62 @@ const REASON = { min: 5, max: 500 }; // backend.md §7 admin.verify
 
 const DEPARTMENT = { path: "department", select: "code name" };
 const WITH_CARD = "+verification.idCardPublicId";
+
+// The on-device check's answers, in the order they're shown (client idCardCheck.js ID_CHECKS).
+export const OCR_CHECKS = ["institute", "rollNumber", "name", "year"];
+
+// Which checks apply to `user` (as the client's scoreIdCard decides): the institute and the year
+// always; the roll number when the email is one; the name when it has a word of 3+ letters.
+function applicableChecks(user) {
+  const local = String(user.email ?? "").split("@")[0];
+  const nameWords = String(user.name ?? "")
+    .normalize("NFKD")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .split(" ");
+  return OCR_CHECKS.filter(
+    (name) =>
+      (name !== "rollNumber" || /^(?:19|20)\d{2}[a-z]{2,6}\d{2,4}$/i.test(local)) &&
+      (name !== "name" || nameWords.some((w) => w.length >= 3)),
+  );
+}
+
+// The optional ocrCheck field of the upload: a JSON string (a multipart field) of { v: 1, checks: {
+// institute, rollNumber?, name?, year: booleans } }. → { checks, score, total }, null when absent; a
+// problem when it has any other shape. Which checks count is decided here, from the member's own
+// email and name: one that applies but is missing counts as not found, one that doesn't apply is
+// dropped, so leaving checks out can't make a perfect score. (The answers are still the browser's
+// word: a hint for the admin, never proof.)
+function readOcrCheck(value, user, problems) {
+  if (absent(value) || value === "") return null;
+  let parsed = null;
+  if (typeof value === "string" && value.length <= 300) {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = null;
+    }
+  }
+  const checks = isPlainObject(parsed) && parsed.v === 1 && isPlainObject(parsed.checks) ? parsed.checks : null;
+  const names = checks ? Object.keys(checks) : [];
+  const valid =
+    checks &&
+    names.length > 0 &&
+    Object.keys(parsed).every((key) => key === "v" || key === "checks") &&
+    names.every((name) => OCR_CHECKS.includes(name) && typeof checks[name] === "boolean");
+  if (!valid) {
+    problems.push({ path: "ocrCheck", message: "Must be the device check's answers." });
+    return null;
+  }
+  const counted = Object.fromEntries(applicableChecks(user).map((name) => [name, checks[name] === true]));
+  return { checks: counted, score: Object.values(counted).filter(Boolean).length, total: Object.keys(counted).length };
+}
+
+// The device check as the admin's queue shows it.
+const ocrCheckView = (ocr) =>
+  ocr?.checks && Number.isInteger(ocr.total)
+    ? { checks: { ...ocr.checks }, score: ocr.score ?? 0, total: ocr.total, at: ocr.at ?? null }
+    : null;
 
 const loadUser = (userId) =>
   isId(userId)
@@ -142,6 +200,7 @@ export function queueItem(user) {
     reviewedAt: v.reviewedAt ?? null,
     reason: v.reason ?? null,
     hasIdCard: Boolean(v.idCardPublicId),
+    ocrCheck: ocrCheckView(v.ocrCheck),
   };
 }
 
@@ -209,6 +268,7 @@ export async function submitIdCard(
   const department = readId(fields.department, "department", problems);
   if (absent(fields.department))
     problems.push({ path: "department", message: "Required." });
+  const ocrCheck = readOcrCheck(fields.ocrCheck, user, problems);
   const received = Array.isArray(files) ? files : [];
   if (received.length !== 1)
     problems.push({
@@ -242,10 +302,16 @@ export async function submitIdCard(
           "verification.idCardPublicId": publicId,
           "verification.submittedAt": now,
           "verification.reason": null,
+          ...(ocrCheck && { "verification.ocrCheck": { ...ocrCheck, at: now } }),
           memberType,
           department: departmentId,
         },
-        $unset: { "verification.reviewedBy": 1, "verification.reviewedAt": 1 },
+        $unset: {
+          "verification.reviewedBy": 1,
+          "verification.reviewedAt": 1,
+          // A new card without a check drops the earlier card's.
+          ...(!ocrCheck && { "verification.ocrCheck": 1 }),
+        },
       },
       { returnDocument: "after", projection: { _id: 1 }, runValidators: true },
     ).lean();
@@ -273,7 +339,7 @@ export async function submitIdCard(
         department: [idOf(user.department), String(departmentId)],
       }),
     },
-    meta: { replacedCard: Boolean(previous) },
+    meta: { replacedCard: Boolean(previous), ...(ocrCheck && { deviceCheck: `${ocrCheck.score}/${ocrCheck.total}` }) },
     requestId,
   });
   return statusView(await findUser(user._id));
@@ -285,7 +351,7 @@ export async function submitIdCard(
 // "+verification.idCardPublicId" together (a path collision).
 const QUEUE_FIELDS = [
   "name email emailHints memberType department",
-  "verification.status verification.submittedAt verification.reviewedAt verification.reason",
+  "verification.status verification.submittedAt verification.reviewedAt verification.reason verification.ocrCheck",
   WITH_CARD,
 ].join(" ");
 
@@ -342,6 +408,88 @@ export async function getIdCardUrl(
     requestId,
   });
   return link;
+}
+
+// Swappable in tests, as useUploader() is: (url, init) → a fetch Response.
+let cardFetchOverride = null;
+export function useCardFetcher(next) {
+  cardFetchOverride = next;
+}
+
+// What the card's bytes are (never what the upstream header says): → the Content-Type to send.
+const CARD_TYPES = { "image/jpeg": "image/jpeg", "image/png": "image/png", "image/webp": "image/webp" };
+const CARD_BYTES_MAX = 6 * 1024 * 1024; // the upload limit is 5 MB; a PDF converted to JPG can grow
+const CARD_FETCH_MS = 8_000;
+const cardUnavailable = () =>
+  new ServiceError(503, "SERVICE_UNAVAILABLE", "The ID card can't be loaded right now. Try again in a minute.");
+
+// One redirect is followed, and only within our own Cloudinary account (the Download API may answer
+// with one to the delivery host); anything else is refused.
+function cloudinaryRedirect(res, cloud) {
+  if (res.status < 300 || res.status >= 400) return null;
+  try {
+    const next = new URL(res.headers.get("location") ?? "", "https://api.cloudinary.com");
+    const ours =
+      next.protocol === "https:" &&
+      ((next.host === "res.cloudinary.com" && next.pathname.startsWith(`/${cloud}/`)) ||
+        (next.host === "api.cloudinary.com" && next.pathname.startsWith(`/v1_1/${cloud}/`)));
+    return ours ? next.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// GET /admin/verifications/:userId/id-card/file (admins) → { bytes, contentType }: the card itself,
+// for the admin's on-device check (FC-12), which can't read Cloudinary's image from the page (another
+// origin, and the CSP allows connections to this site only). The same checks, limit and audit entry
+// as getIdCardUrl, with meta.purpose "device_check". Fetched through a 5-minute signed link (at most
+// one redirect, within our account), read with a size cap, and served only when the bytes are a JPEG,
+// PNG or WebP (a PDF card is stored as JPG), under the type the bytes say. Nothing about the card is
+// logged.
+export async function getIdCardFile(viewerId, userId, { requestId, now = new Date() } = {}) {
+  const admin = await requireAdminActor(viewerId);
+  const user = await findReviewable(admin, userId);
+  const publicId = user.verification?.idCardPublicId;
+  if (!publicId) throw notFound("ID card");
+  const link = await signedUrl(publicId, KIND, { now });
+  if (!link) throw notFound("ID card");
+
+  const get = (url, redirect) =>
+    (cardFetchOverride ?? fetch)(url, { redirect, signal: AbortSignal.timeout(CARD_FETCH_MS) });
+  let bytes;
+  try {
+    let res = await get(link.url, "manual");
+    const next = cloudinaryRedirect(res, process.env.CLOUDINARY_CLOUD_NAME);
+    if (next) {
+      await discardBody(res);
+      res = await get(next, "error");
+    }
+    if (!res.ok) {
+      await discardBody(res);
+      throw cardUnavailable();
+    }
+    if (Number(res.headers.get("content-length") ?? 0) > CARD_BYTES_MAX) {
+      await discardBody(res);
+      throw cardUnavailable();
+    }
+    bytes = await readCapped(res, CARD_BYTES_MAX);
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    log.warn({ err: { name: err?.name } }, "Couldn't fetch an ID card for a device check");
+    throw cardUnavailable();
+  }
+  if (!bytes) throw cardUnavailable();
+  const contentType = CARD_TYPES[(await fileTypeFromBuffer(bytes))?.mime];
+  if (!contentType) throw conflict("This file can't be checked on the device. Open it and check it yourself.");
+
+  await record({
+    actor: { id: admin._id, role: "admin" },
+    action: "verification.id_viewed",
+    entity: { type: "user", id: user._id },
+    meta: { purpose: "device_check" },
+    requestId,
+  });
+  return { bytes, contentType };
 }
 
 function readDecision(input) {
@@ -508,7 +656,7 @@ export async function decideVerification(
             "verification.status": "rejected",
             "verification.reason": reason,
           },
-      $unset: { "verification.idCardPublicId": 1 },
+      $unset: { "verification.idCardPublicId": 1, "verification.ocrCheck": 1 },
     },
     { returnDocument: "after", projection: { _id: 1 }, runValidators: true },
   ).lean();

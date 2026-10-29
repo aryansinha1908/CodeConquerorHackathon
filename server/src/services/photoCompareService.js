@@ -29,6 +29,7 @@ import { aiQuotaFor, cleanText, hasContactDetails, redactPersonal } from "./aiSe
 import { isDemoAccount } from "./authService.js";
 import { AiUnavailableError, withAiQuota } from "./aiQuotaService.js";
 import { isId, requireUser } from "./params.js";
+import { discardBody, readCapped } from "../lib/readCapped.js";
 
 const PROMPT_VERSION = "compare-v2";
 const COMPARE_STATUSES = new Set(["checked_out", "completed", "flagged"]);
@@ -102,33 +103,6 @@ export function originalPhotoUrl(publicId, cloud = process.env.CLOUDINARY_CLOUD_
   return `https://res.cloudinary.com/${encodeURIComponent(cloud)}/image/upload/${encodePath(publicId)}`;
 }
 
-// The body, read until it ends or passes `max` bytes for this photo or the request's `budget`
-// (→ null: too big). Content-Length isn't trusted to be there.
-async function readCapped(res, max, budget) {
-  const reader = res.body?.getReader?.();
-  const chunks = [];
-  let size = 0;
-  if (!reader) {
-    const bytes = Buffer.from(await res.arrayBuffer());
-    chunks.push(bytes);
-    size = bytes.length;
-  } else {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > max || size > budget.left) {
-        await reader.cancel().catch(() => {});
-        return null;
-      }
-      chunks.push(value);
-    }
-  }
-  if (!size || size > max || size > budget.left) return null;
-  budget.left -= size;
-  return Buffer.concat(chunks);
-}
-
 // One URL → { image } | { missing: true } (Cloudinary answered with an error status or a non-image).
 // Throws on a timeout, a network failure or a photo that's too big.
 async function download(url, signal, budget) {
@@ -138,12 +112,17 @@ async function download(url, signal, budget) {
   });
   const type = (res.headers.get("content-type") ?? "").toLowerCase();
   if (!res.ok || !PHOTO_TYPES.test(type)) {
-    await res.body?.cancel?.().catch(() => {});
+    await discardBody(res);
     return { missing: true };
   }
-  if (Number(res.headers.get("content-length") ?? 0) > PHOTO_BYTES_MAX) throw new Error("photo too large");
-  const bytes = await readCapped(res, PHOTO_BYTES_MAX, budget);
+  const max = Math.min(PHOTO_BYTES_MAX, budget.left);
+  if (Number(res.headers.get("content-length") ?? 0) > max) {
+    await discardBody(res);
+    throw new Error("photo too large");
+  }
+  const bytes = await readCapped(res, max);
   if (!bytes) throw new Error("photo too large");
+  budget.left -= bytes.length;
   return { image: { mimeType: type.split(";")[0].trim(), data: bytes.toString("base64") } };
 }
 

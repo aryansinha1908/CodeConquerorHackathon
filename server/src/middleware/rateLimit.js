@@ -350,7 +350,8 @@ export const refreshLimiter = createLimiter("general", {
 });
 export const bookingCreateLimiter = createLimiter("bookingCreate");
 export const uploadLimiter = createLimiter("upload");
-// One counter for GET /badge-requests/:id/evidence and GET /admin/verifications/:userId/id-card.
+// One counter for GET /badge-requests/:id/evidence, GET /admin/verifications/:userId/id-card and its
+// /file (the card for the admin's on-device check): each signs a link. Viewing and checking a card is two.
 export const fileLinkLimiter = createLimiter("fileLink");
 
 // ── The global cap on OTP emails ───────────────────────────────────────────

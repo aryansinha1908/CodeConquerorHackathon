@@ -23,6 +23,7 @@ import {
   User,
 } from "../../src/models/index.js";
 import { signAccessToken } from "../../src/services/authTokens.js";
+import { useCardFetcher } from "../../src/services/verificationService.js";
 import { skip, useTestDatabase } from "../integration/fixtures.js";
 
 logger.level = "silent";
@@ -98,11 +99,13 @@ function idCardForm({
   memberType = "ug",
   department = f.cse._id,
   file = [PNG, "card.png", "image/png"],
+  ocrCheck,
 } = {}) {
   const form = new FormData();
   // null leaves the field out (undefined would take the default).
   if (memberType !== null) form.append("memberType", memberType);
   if (department !== null) form.append("department", String(department));
+  if (ocrCheck !== undefined) form.append("ocrCheck", ocrCheck);
   if (file) {
     const [bytes, name, type] = file;
     form.append("idCard", new Blob([bytes], { type }), name);
@@ -422,6 +425,7 @@ describe("ID-card verification over HTTP", { skip }, () => {
         reviewedAt: null,
         reason: null,
         hasIdCard: true,
+        ocrCheck: null,
       });
       assert.equal(JSON.stringify(res.body).includes("campuscommons/"), false);
 
@@ -831,6 +835,178 @@ describe("ID-card verification over HTTP", { skip }, () => {
         (await decide(admin, applicant, { decision: "approve" })).status,
         200,
       );
+    });
+  });
+
+  describe("the on-device check (FC-12)", () => {
+    const answers = (checks) => JSON.stringify({ v: 1, checks });
+    const queue = async () => (await call("GET", "/admin/verifications", { user: admin })).body.data;
+    const cardFile = (who, user) =>
+      fetch(`${origin}/api/v1/admin/verifications/${user._id}/id-card/file`, {
+        headers: { authorization: `Bearer ${signAccessToken(who)}` },
+      });
+    afterEach(() => useCardFetcher(null));
+
+    test("the answers go with the upload, are counted here, and show in the admin's queue", async () => {
+      const res = await submit(applicant, { ocrCheck: answers({ institute: true, rollNumber: true, name: false, year: true }) });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const saved = await stored(applicant);
+      assert.deepEqual(saved.ocrCheck.checks, { institute: true, rollNumber: true, name: false, year: true });
+      assert.equal(saved.ocrCheck.score, 3);
+      assert.equal(saved.ocrCheck.total, 4);
+      const [item] = await queue();
+      assert.deepEqual(item.ocrCheck.checks, { institute: true, rollNumber: true, name: false, year: true });
+      assert.equal(item.ocrCheck.score, 3);
+      assert.equal(item.ocrCheck.total, 4);
+      assert.equal("ocrCheck" in res.body.data, false, "the member's own view doesn't need it");
+      const [entry] = await audits("verification.submitted");
+      assert.equal(entry.meta.deviceCheck, "3/4");
+    });
+
+    test("anything but the answers' shape is 400 ocrCheck, and nothing is stored", async () => {
+      for (const bad of [
+        "not json",
+        JSON.stringify({ v: 2, checks: { institute: true } }),
+        answers({}),
+        answers({ institute: "yes" }),
+        answers({ institute: true, text: true }),
+        JSON.stringify({ v: 1, checks: { institute: true }, text: "NIT JAMSHEDPUR Ananya" }),
+        "x".repeat(400),
+      ]) {
+        const res = await submit(applicant, { ocrCheck: bad });
+        assertError(res, 400, "VALIDATION_ERROR");
+        assert.equal(res.body.error.details[0].path, "ocrCheck", bad);
+      }
+      assert.equal(fake.uploads.length, 0);
+    });
+
+    test("a new card without a check drops the old check; the decision clears it with the card", async () => {
+      await submit(applicant, { ocrCheck: answers({ institute: true, year: false }) });
+      await submit(applicant);
+      assert.equal((await stored(applicant)).ocrCheck, undefined);
+      await submit(applicant, { ocrCheck: answers({ institute: true, year: true }) });
+      await decide(admin, applicant, { decision: "approve" });
+      assert.equal((await stored(applicant)).ocrCheck, undefined);
+    });
+
+    test("the card's bytes for the admin's own check: images only, never cached, audited", async () => {
+      await submit(applicant);
+      const requested = [];
+      useCardFetcher(async (url, init) => {
+        requested.push({ url, redirect: init.redirect });
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      });
+      const res = await cardFile(admin, applicant);
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-type"), "image/png");
+      assert.equal(res.headers.get("cache-control"), "no-store");
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+      assert.deepEqual(Buffer.from(await res.arrayBuffer()), PNG);
+      assert.equal(requested.length, 1);
+      assert.match(requested[0].url, /^https:\/\/api\.cloudinary\.com\//, "through the signed link");
+      assert.equal(requested[0].redirect, "manual", "redirects are checked, not followed blindly");
+      const [entry] = await audits("verification.id_viewed");
+      assert.equal(entry.meta.purpose, "device_check");
+
+      useCardFetcher(async () => new Response("%PDF", { headers: { "content-type": "application/pdf" } }));
+      assert.equal((await cardFile(admin, applicant)).status, 409);
+      useCardFetcher(async () => {
+        throw new TypeError("fetch failed");
+      });
+      assert.equal((await cardFile(admin, applicant)).status, 503);
+    });
+
+    test("the server decides which checks apply: one left out counts as not found", async () => {
+      await submit(applicant, { ocrCheck: answers({ institute: true }) });
+      const saved = await stored(applicant);
+      assert.deepEqual(saved.ocrCheck.checks, { institute: true, rollNumber: false, name: false, year: false });
+      assert.equal(saved.ocrCheck.score, 1);
+      assert.equal(saved.ocrCheck.total, 4, "a roll-number address has all four checks");
+      const staff = await newMember("registrar.office@nitjsr.ac.in", { emailHints: null });
+      await submit(staff, { ocrCheck: answers({ institute: true, rollNumber: true, name: true, year: true }) });
+      const staffCheck = (await stored(staff)).ocrCheck;
+      assert.deepEqual(staffCheck.checks, { institute: true, name: true, year: true }, "no roll number to look for");
+      assert.equal(staffCheck.total, 3);
+    });
+
+    test("the card's type comes from its bytes, never from Cloudinary's header", async () => {
+      await submit(applicant);
+      useCardFetcher(async () => new Response(PNG, { headers: { "content-type": "application/octet-stream" } }));
+      const generic = await cardFile(admin, applicant);
+      assert.equal(generic.status, 200, "Cloudinary's download link may not say image/png");
+      assert.equal(generic.headers.get("content-type"), "image/png");
+      useCardFetcher(async () => new Response(PNG, { headers: { "content-type": "image/png, text/html" } }));
+      assert.equal((await cardFile(admin, applicant)).headers.get("content-type"), "image/png");
+      useCardFetcher(async () => new Response("<svg xmlns='http://www.w3.org/2000/svg'/>", { headers: { "content-type": "image/png" } }));
+      assert.equal((await cardFile(admin, applicant)).status, 409, "not an image, whatever the header says");
+    });
+
+    test("one redirect within our Cloudinary account is followed; one elsewhere is refused", async (t) => {
+      const saved = process.env.CLOUDINARY_CLOUD_NAME;
+      process.env.CLOUDINARY_CLOUD_NAME = "test";
+      t.after(() => {
+        if (saved === undefined) delete process.env.CLOUDINARY_CLOUD_NAME;
+        else process.env.CLOUDINARY_CLOUD_NAME = saved;
+      });
+      await submit(applicant);
+      const to = (location) => async (url, init) =>
+        url.startsWith("https://api.cloudinary.com/")
+          ? new Response(null, { status: 302, headers: { location } })
+          : (assert.equal(init.redirect, "error"), new Response(PNG, { headers: { "content-type": "image/png" } }));
+      useCardFetcher(to("https://res.cloudinary.com/test/image/authenticated/s--x--/v1/campuscommons/id-cards/abc.png"));
+      assert.equal((await cardFile(admin, applicant)).status, 200);
+      for (const elsewhere of ["https://evil.example/abc.png", "https://res.cloudinary.com/other-cloud/image/upload/abc.png", "http://res.cloudinary.com/test/x.png"]) {
+        useCardFetcher(to(elsewhere));
+        assert.equal((await cardFile(admin, applicant)).status, 503, elsewhere);
+      }
+    });
+
+    test("HEAD doesn't fetch or audit the card", async () => {
+      await submit(applicant);
+      let fetched = 0;
+      useCardFetcher(async () => {
+        fetched += 1;
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      });
+      const res = await fetch(`${origin}/api/v1/admin/verifications/${applicant._id}/id-card/file`, {
+        method: "HEAD",
+        headers: { authorization: `Bearer ${signAccessToken(admin)}` },
+      });
+      assert.equal(res.status, 405);
+      assert.equal(fetched, 0);
+      assert.equal((await audits("verification.id_viewed")).length, 0);
+    });
+
+    test("a body that is too big, or breaks off, is a 503, not a 500", async () => {
+      await submit(applicant);
+      let pulled = 0;
+      const endless = () =>
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1 << 20;
+            controller.enqueue(new Uint8Array(1 << 20));
+          },
+        });
+      useCardFetcher(async () => new Response(endless(), { headers: { "content-type": "image/png" } }));
+      assert.equal((await cardFile(admin, applicant)).status, 503);
+      assert.ok(pulled <= 8 << 20, `stopped reading at the cap (read ${pulled >> 20} MB)`);
+      const broken = new ReadableStream({
+        start(controller) {
+          controller.enqueue(PNG.subarray(0, 8));
+          controller.error(new Error("socket hang up"));
+        },
+      });
+      useCardFetcher(async () => new Response(broken, { headers: { "content-type": "image/png" } }));
+      assert.equal((await cardFile(admin, applicant)).status, 503);
+    });
+
+    test("only admins, and 404 without a card", async () => {
+      useCardFetcher(async () => new Response(PNG, { headers: { "content-type": "image/png" } }));
+      await submit(applicant);
+      assert.equal((await cardFile(applicant, applicant)).status, 403);
+      const nobody = await newMember("2024ugcs111@nitjsr.ac.in");
+      assert.equal((await cardFile(admin, nobody)).status, 404);
+      assert.equal((await audits("verification.id_viewed")).length, 0);
     });
   });
 });

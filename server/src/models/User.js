@@ -67,6 +67,25 @@ const userSchema = new Schema(
       reviewedBy: ref("User"),
       reviewedAt: Date,
       reason: { type: String, trim: true, maxlength: 500 },
+      // The on-device check of the card (FC-12): yes/no per check, never the card's text. Sent by
+      // the member's browser, so a hint only; cleared with the card when the admin decides.
+      ocrCheck: {
+        type: new Schema(
+          {
+            checks: {
+              institute: Boolean,
+              rollNumber: Boolean,
+              name: Boolean,
+              year: Boolean,
+            },
+            score: int({ min: 0, max: 4 }),
+            total: int({ min: 1, max: 4 }),
+            at: Date,
+          },
+          { _id: false },
+        ),
+        default: undefined,
+      },
     },
     // Kept in sync with OrgUnit.managers by the assign-managers route.
     managedOrgUnits: [ref("OrgUnit")],

@@ -11,6 +11,7 @@ import {
 } from '../../verification/api';
 import { formatIstDateTime } from '../../../lib/time';
 import { StaggerItem } from '../../../components/Motion';
+import { StoredDeviceCheck } from '../../verification/DeviceCheck';
 
 // Never colour alone (frontend.md §1, principle 2): every status has an icon and a label too. Gold,
 // not amber, for pending: white on amber is under the 4.5:1 contrast of frontend.md §10.3.
@@ -41,7 +42,8 @@ function Differs({ children }) {
 
 /**
  * One row of GET /admin/verifications: { user: { _id, name, email, emailHints, memberType,
- * department }, status, submittedAt, reviewedAt, reason, hasIdCard }. units: GET /org-units data.
+ * department }, status, submittedAt, reviewedAt, reason, hasIdCard, ocrCheck: { checks, score, total,
+ * at } | null (the member's on-device check, FC-12) }. units: GET /org-units data.
  */
 export function QueueItem({ item, units, isSelf, onView, onDecide }) {
   const { user } = item;
@@ -89,6 +91,14 @@ export function QueueItem({ item, units, isSelf, onView, onDecide }) {
           </Field>
           <Field label="Submitted">{submitted ?? 'Not recorded'}</Field>
           {reviewed && <Field label="Reviewed">{reviewed}</Field>}
+          {item.ocrCheck && (
+            <div className="sm:col-span-2 min-w-0">
+              <dt className="text-[10px] uppercase tracking-wider text-[#1a1a1a]/70">Device check</dt>
+              <dd className="mt-1">
+                <StoredDeviceCheck ocrCheck={item.ocrCheck} />
+              </dd>
+            </div>
+          )}
           {item.reason && (
             <div className="sm:col-span-2 lg:col-span-3 min-w-0">
               <dt className="text-[10px] uppercase tracking-wider text-[#1a1a1a]/70">Reason</dt>

@@ -107,6 +107,16 @@ http.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config;
+    // A file request (responseType 'blob') gets its error envelope as a Blob too: read it, so the
+    // code, message and retry time survive, and a 401 still refreshes.
+    const body = err.response?.data;
+    if (typeof Blob !== 'undefined' && body instanceof Blob && /json/i.test(body.type)) {
+      try {
+        err.response.data = JSON.parse(await body.text());
+      } catch {
+        // Not JSON after all: the status alone is known.
+      }
+    }
     const normalised = normalise(err);
     if (
       normalised.status !== 401 ||

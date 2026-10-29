@@ -58,6 +58,19 @@ export async function getIdCardUrl(userId) {
 }
 
 /**
+ * GET /admin/verifications/:userId/id-card/file → the card's image as a Blob, for the on-device check
+ * (FC-12). Audited like the link, and counted with it by the fileLink limit. Errors are normalised as
+ * usual (lib/http.js reads a JSON error from the Blob). `signal` cancels it.
+ */
+export async function getIdCardFile(userId, { signal } = {}) {
+  const res = await http.get(`/admin/verifications/${encodeURIComponent(userId)}/id-card/file`, {
+    responseType: 'blob',
+    signal,
+  });
+  return res.data;
+}
+
+/**
  * PATCH /admin/verifications/:userId { decision, reason?, memberType?, department?, submittedAt } →
  * data = the queue item. submittedAt is the reviewed item's own value (null when it had none); the
  * user must still be pending with that same submission, else 409 INVALID_TRANSITION.

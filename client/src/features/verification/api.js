@@ -190,12 +190,14 @@ export async function getVerificationStatus() {
 
 /**
  * The multipart body of POST /verification/id-card. The text fields go first: a multipart parser
- * sees fields in stream order, so the server can check them before it reads the file.
+ * sees fields in stream order, so the server can check them before it reads the file. ocrCheck: the
+ * on-device check's answers (idCardCheck.js ocrCheckField), when there are any.
  */
-export function buildIdCardForm({ file, memberType, department }) {
+export function buildIdCardForm({ file, memberType, department, ocrCheck = null }) {
   const form = new FormData();
   form.append('memberType', memberType);
   form.append('department', department);
+  if (ocrCheck) form.append('ocrCheck', ocrCheck);
   form.append('idCard', file, file?.name || 'id-card');
   return form;
 }

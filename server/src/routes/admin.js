@@ -9,6 +9,7 @@ import { sendData, sendList } from "../lib/respond.js";
 import { listUsers } from "../services/userService.js";
 import {
   decideVerification,
+  getIdCardFile,
   getIdCardUrl,
   listVerifications,
 } from "../services/verificationService.js";
@@ -36,6 +37,32 @@ router.get(
     });
     res.set("Cache-Control", "no-store");
     sendData(req, res, link);
+  },
+);
+
+// The card's bytes, for the admin's on-device check (FC-12); audited like the link, and counted by the
+// same limiter. Not JSON: the image itself, never cached, never sniffed as anything but an image.
+router.get(
+  "/verifications/:userId/id-card/file",
+  verifyAuth,
+  generalLimiter,
+  fileLinkLimiter,
+  async (req, res) => {
+    // Express answers HEAD with this handler too: that would download and audit with nothing shown.
+    if (req.method !== "GET") {
+      res.set("Allow", "GET");
+      return res.status(405).end();
+    }
+    const { bytes, contentType } = await getIdCardFile(req.user.id, req.params.userId, {
+      requestId: req.id,
+    });
+    res.set({
+      "Cache-Control": "no-store",
+      "Content-Type": contentType,
+      "Content-Disposition": "inline",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.send(bytes);
   },
 );
 

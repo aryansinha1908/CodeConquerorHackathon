@@ -45,6 +45,8 @@ import {
   uploadIdCard,
   verificationKeys,
 } from './api';
+import { MemberDeviceCheck } from './DeviceCheck';
+import { ocrCheckField, useIdCardCheck } from './idCardCheck';
 
 // /verification (frontend.md §6.2, F-02): the real status from GET /verification/status and the
 // ID-card upload (POST /verification/id-card). No demo shortcuts: approval comes from an admin.
@@ -262,6 +264,9 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
   );
 
   const upload = useMutation({ mutationFn: uploadIdCard });
+  // The on-device check of a picked image (FC-12): it never blocks the upload; its yes/no answers go
+  // with it when it has finished and read something.
+  const deviceCheck = useIdCardCheck();
   const busy = compressing || upload.isPending;
   const fileError = fieldErrors.idCard;
 
@@ -291,6 +296,11 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
     }
     setFile(chosen);
     setPreviewUrl(chosen.type.startsWith('image/') ? URL.createObjectURL(chosen) : null);
+    if (chosen.type.startsWith('image/')) {
+      deviceCheck.run(chosen, { email: user?.email, name: user?.name, emailHints: user?.emailHints });
+    } else {
+      deviceCheck.reset();
+    }
     setFileNote(
       chosen === picked ? kb(picked.size) : `${kb(picked.size)} → ${kb(chosen.size)}, optimised`
     );
@@ -298,6 +308,7 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
 
   const clearFile = () => {
     pickRef.current += 1;
+    deviceCheck.reset();
     setCompressing(false);
     setFile(null);
     setPreviewUrl(null);
@@ -335,7 +346,9 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
     setSubmitError(null);
     if (focusFirstInvalid(errors)) return;
 
-    upload.mutate(buildIdCardForm({ file, memberType, department }), {
+    const ocrCheck =
+      deviceCheck.status === 'done' && deviceCheck.result?.readable ? ocrCheckField(deviceCheck.result) : null;
+    upload.mutate(buildIdCardForm({ file, memberType, department, ocrCheck }), {
       onSuccess: (envelope) => {
         clearFile();
         onSubmitted(envelope);
@@ -555,6 +568,9 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
                     PDF attached: no preview
                   </p>
                 )}
+                <div className="mt-3">
+                  <MemberDeviceCheck check={deviceCheck} pdf={!file.type.startsWith('image/')} />
+                </div>
               </div>
             )}
 
