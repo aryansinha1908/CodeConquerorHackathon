@@ -42,6 +42,14 @@ The config lives in the repo:
 
 Keep the values you collect in a password manager, or in `server/.env.production.local`, which is git-ignored (check with `cd server && git check-ignore .env.production.local`; it must print the name). [§8](#8-seed-the-atlas-database) uses that file.
 
+**They go into Render, not into `server/.env`.** `server/.env` stays your local development setup.
+- **Redis:** keep the local one there (`REDIS_URL=redis://127.0.0.1:6379`).
+  - Many campus and office networks block outgoing port 6379, which is Upstash's, so a laptop on one can't reach it. The server then logs `connect ETIMEDOUT` and `Redis unavailable at startup`, and bookings answer 503.
+  - `cd server && npm run check:redis` tells you whether your network gets through. Render's does.
+- **Database:** give local development its own database name in `MONGODB_URI`, for example `/campuscommons-dev` instead of `/campuscommons`.
+  - Each API clears the caches only in its own Redis. A change made through your local API would leave the deployed one serving stale lists until their TTL runs out.
+  - Accounts you register while testing locally would also be real accounts on the demo instance ([§12](#12-the-demo_mode-decision)).
+
 ---
 
 ## 1. MongoDB Atlas
@@ -272,6 +280,13 @@ The seed writes the 18 NIT JSR org units, the badge catalogue, 13 sample resourc
   `DOTENV_PATH` makes dotenv load that file instead of `server/.env`. A variable already set in the shell still wins.
 
   Expect `Seeding the "campuscommons" database.` first and `Done. Demo logins: …` last. Point it at the **Upstash** Redis, not a local one: the seed clears the deployed API's caches there, and the demo bookings need the Redis lock. Without Redis it prints `Demo bookings skipped`.
+
+  On a network that blocks port 6379 (campus Wi-Fi often does: [§0](#0-before-you-start)), the laptop can't reach Upstash. Upstash's port 443 serves only its REST API, not the Redis protocol, so there is no way around it there. Either:
+  - **run the seed from a phone hotspot**, as above; or
+  - **seed with your local Redis** (`REDIS_URL=redis://127.0.0.1:6379` in `.env.production.local`, with the Atlas `MONGODB_URI`).
+    - Any Redis takes the booking lock, so the demo bookings are created.
+    - Only clearing the deployed API's caches is skipped: they expire on their own within 10 minutes, and a new deployment has none.
+    - Seed while nobody is using the site: the deployed API's bookings take their lock in Upstash, not in your local Redis.
 
 - [ ] Run it while the API is idle. A sweep that runs mid-seed can move a demo booking on, which is then skipped with a warning; run the seed again.
 - [ ] **Seed shortly before judging.** The demo bookings are placed relative to the moment of the seed ("tomorrow 10:00", "in use now"), and the sweeper moves them on as time passes.

@@ -35,7 +35,8 @@ function tcp() {
 
 function handshake() {
   return new Promise((resolve) => {
-    const t = tls.connect({ host, port, servername: host, timeout: timeoutMs });
+    // SNI takes a host name only: an IP address there is a Node deprecation warning.
+    const t = tls.connect({ host, port, ...(net.isIP(host) ? {} : { servername: host }), timeout: timeoutMs });
     t.on("secureConnect", () => { t.end(); resolve("ok"); });
     t.on("timeout", () => { t.destroy(); resolve("timeout"); });
     t.on("error", (e) => resolve(e.code ?? e.message));
