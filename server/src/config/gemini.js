@@ -50,7 +50,7 @@ function toPart(part) {
 // `reachedAi` says whether Google worked on the request (a timeout, a 5xx, a blocked, empty or broken
 // answer). withAiQuota() charges those: refunding them would let anyone who can make Gemini fail (a
 // question asking for a very long answer, say) retry for free until the campus-wide cap is gone. A
-// request Google never processed (no connection, a 4xx other than 429) is refunded.
+// request Google never processed (no connection, a 4xx other than 429, a 503 "overloaded") is refunded.
 function unavailable(reason, err, { reachedAi }) {
   log.warn({ reason, status: err?.status, googleStatus: err?.googleStatus }, "Gemini call failed");
   const failure = new AiUnavailableError("AI couldn't answer just now. Regular search still works.", err ? { cause: err } : undefined);
@@ -110,7 +110,9 @@ export async function generateJson({
       .catch(() => null);
     const err = Object.assign(new Error(`Gemini answered HTTP ${res.status}`), { status: res.status, googleStatus });
     if (res.status === 429) throw err;
-    throw unavailable(`http_${res.status}`, err, { reachedAi: res.status >= 500 });
+    // 503 UNAVAILABLE is Google's "overloaded": nothing was processed, and no one can cause it, so
+    // it is refunded. Any other 5xx (500, a 504 deadline) may have done the work, so it is charged.
+    throw unavailable(`http_${res.status}`, err, { reachedAi: res.status >= 500 && res.status !== 503 });
   }
 
   const answer = await res.json().catch(() => null);

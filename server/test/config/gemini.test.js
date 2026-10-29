@@ -118,6 +118,10 @@ describe("generateJson", () => {
     await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(true));
     answer(400, { error: { status: "INVALID_ARGUMENT" } });
     await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(false));
+    answer(503, { error: { status: "UNAVAILABLE", message: "The model is overloaded." } });
+    await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(false), "Google's overload is refunded");
+    answer(504, { error: { status: "DEADLINE_EXCEEDED" } });
+    await assert.rejects(generateJson({ parts: [{ text: "x" }], schema: SCHEMA }), reached(true));
     globalThis.fetch = async () => {
       throw new TypeError("fetch failed");
     };
