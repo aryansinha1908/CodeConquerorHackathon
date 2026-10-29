@@ -137,6 +137,20 @@ describe("checkEnv", () => {
     );
   });
 
+  test("on Render, an SMTP port its free instances block warns, naming the one that works", () => {
+    const onRender = { ...complete(), RENDER: "true" };
+    for (const port of ["587", "465", "25", ""]) {
+      const { errors, warnings } = checkEnv({ ...onRender, SMTP_PORT: port });
+      assert.deepEqual(errors, [], `port ${port || "(default 587)"}`);
+      assert.equal(warnings.length, 1, `port ${port || "(default 587)"}`);
+      assert.match(warnings[0], new RegExp(`SMTP_PORT is ${port || 587}, which Render's free instances block`));
+      assert.match(warnings[0], /SMTP_PORT=2525/);
+    }
+    assert.deepEqual(checkEnv({ ...onRender, SMTP_PORT: "2525" }).warnings, []);
+    // Off Render (a laptop, another host) 587 is the normal port.
+    assert.deepEqual(checkEnv({ ...complete(), SMTP_PORT: "587" }).warnings, []);
+  });
+
   test("the same value for both token secrets warns without showing it", () => {
     const env = { ...complete(), REFRESH_TOKEN_SECRET: secret("access") };
     const result = checkEnv(env);

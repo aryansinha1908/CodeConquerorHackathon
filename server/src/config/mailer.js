@@ -35,6 +35,11 @@ function smtpTransport() {
       auth: process.env.SMTP_USER
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
         : undefined,
+      // Fail in seconds, not nodemailer's 2 minutes, when a host drops the port (Render's free plan
+      // on 25/465/587): the failure is logged while the member is still waiting for the code.
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
     });
   }
   return transport;
