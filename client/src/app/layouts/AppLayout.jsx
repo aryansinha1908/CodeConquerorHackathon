@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
+import { NotificationBell } from '../../components/NotificationBell';
 
 export function AppLayout() {
   const navigate = useNavigate();
@@ -152,6 +153,9 @@ export function AppLayout() {
                 {user?.department?.name || user?.memberType || 'NIT JSR'}
               </span>
             </div>
+
+            {/* frontend.md §7: the unread count and the latest 5, on every page of the app shell. */}
+            <NotificationBell />
 
             <button
               onClick={handleLogout}

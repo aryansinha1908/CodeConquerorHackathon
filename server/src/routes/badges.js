@@ -97,8 +97,8 @@ router.post(
   },
 );
 
-// { userId, note? } → the queue row, the badge active (renewed if it was still valid). 200: the
-// member's row is reused when there is one, so nothing new is necessarily created.
+// { userId | email, note? } → the queue row, the badge active (renewed if it was still valid). 200:
+// the member's row is reused when there is one, so nothing new is necessarily created.
 router.post("/:id/grant", ...write, async (req, res) => {
   sendData(
     req,

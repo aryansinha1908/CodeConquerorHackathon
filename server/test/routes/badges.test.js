@@ -131,6 +131,7 @@ describe("/api/v1/badges and /api/v1/badge-requests", { skip }, () => {
       ["POST", `/badges/${id}/requests`, {}],
       ["POST", `/badges/${id}/grant`, {}],
       ["GET", "/badge-requests"],
+      ["GET", `/badge-requests/${id}/evidence`],
       ["PATCH", `/badge-requests/${id}`, { decision: "approve" }],
     ]) {
       const res = await api.call(method, path, { json });
@@ -416,7 +417,7 @@ describe("/api/v1/badges and /api/v1/badge-requests", { skip }, () => {
     assert.equal(await uploadHits(f.student), null);
   });
 
-  test("POST /badges/:id/grant: the unit's manager grants directly → 200 with the queue row; others are 403; no userId is 400", async () => {
+  test("POST /badges/:id/grant: the unit's manager grants directly → 200 with the queue row; others are 403; no member named is 400", async () => {
     const res = await api.call("POST", `/badges/${laser._id}/grant`, {
       user: f.manager,
       json: { userId: String(f.student2._id), note: "In-person induction" },
@@ -445,7 +446,98 @@ describe("/api/v1/badges and /api/v1/badge-requests", { skip }, () => {
     assertError(none, 400, "VALIDATION_ERROR");
     assert.deepEqual(none.body.error.details, [
       { path: "userId", message: "Required." },
+      { path: "email", message: "Required." },
     ]);
+  });
+
+  test("POST /badges/:id/grant by email: any case finds the member; an unknown email is 400 on email", async () => {
+    const res = await api.call("POST", `/badges/${laser._id}/grant`, {
+      user: f.manager,
+      json: { email: "Student3@Demo.CampusCommons.test" },
+    });
+    assertOk(res);
+    assert.equal(res.body.data.user._id, String(f.student3._id));
+    assert.equal(res.body.data.state, "active");
+    assert.ok(!("email" in res.body.data.user));
+
+    const unknown = await api.call("POST", `/badges/${laser._id}/grant`, {
+      user: f.manager,
+      json: { email: "nobody@nitjsr.ac.in" },
+    });
+    assertError(unknown, 400, "VALIDATION_ERROR");
+    assert.deepEqual(unknown.body.error.details, [
+      { path: "email", message: "No account has this email." },
+    ]);
+  });
+
+  test("GET /badge-requests/:id/evidence: a 5-minute link, never cached, audited; the member's own too; others 403; no file 404", async () => {
+    await request(f.student, lathe, {
+      form: evidenceForm({ note: "Certificate attached." }),
+    });
+    const row = await UserBadge.findOne({ badge: lathe._id }).lean();
+    const evidence = (user, id = row._id) =>
+      api.call("GET", `/badge-requests/${id}/evidence`, { user });
+
+    const before = Date.now();
+    const res = await evidence(f.manager);
+    assertOk(res);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(Object.keys(res.body.data).sort(), ["expiresAt", "url"]);
+    const expiresAt = new Date(res.body.data.expiresAt).getTime();
+    assert.ok(expiresAt >= before + 5 * 60_000 - 1000);
+    assert.ok(expiresAt <= Date.now() + 5 * 60_000);
+    const [view] = await AuditLog.find({
+      action: "badge.evidence_viewed",
+    }).lean();
+    assert.deepEqual(
+      [String(view.actor.id), view.actor.role, view.requestId],
+      [String(f.manager._id), "manager", res.body.requestId],
+    );
+
+    // The member who sent it may open it; another unit's manager and other members may not.
+    assertOk(await evidence(f.student));
+    for (const user of [f.cseManager, f.student2])
+      assertError(await evidence(user), 403, "FORBIDDEN");
+    assertError(await evidence(f.manager, "not-an-id"), 404, "NOT_FOUND");
+    const json = await request(f.student2, laser, { json: {} });
+    const none = await evidence(f.manager, json.body.data._id);
+    assertError(none, 404, "NOT_FOUND");
+    assert.equal(none.body.error.message, "Evidence not found.");
+    assert.equal(
+      await AuditLog.countDocuments({ action: "badge.evidence_viewed" }),
+      2,
+    );
+  });
+
+  test("GET /badge-requests/:id/evidence: 20 links per 15 minutes per user, shared with the ID-card link", async () => {
+    // Each link costs a Cloudinary Admin API call, and that quota is shared by every reviewer.
+    await request(f.student, lathe, {
+      form: evidenceForm({ note: "Certificate attached." }),
+    });
+    const row = await UserBadge.findOne({ badge: lathe._id }).lean();
+    const evidence = (user) =>
+      api.call("GET", `/badge-requests/${row._id}/evidence`, { user });
+    for (let i = 0; i < 20; i++) assertOk(await evidence(f.student));
+    const limited = await evidence(f.student);
+    assertError(limited, 429, "RATE_LIMITED");
+    assert.deepEqual(
+      [limited.body.error.details.tier, limited.body.error.details.limit],
+      ["fileLink", 20],
+    );
+    assert.equal(
+      await AuditLog.countDocuments({ action: "badge.evidence_viewed" }),
+      20,
+    );
+    // Per user: the manager still opens it. The admin's ID-card links come out of the same 20.
+    assertOk(await evidence(f.manager));
+    for (let i = 0; i < 20; i++) assertOk(await evidence(f.admin));
+    const idCard = await api.call(
+      "GET",
+      `/admin/verifications/${f.student._id}/id-card`,
+      { user: f.admin },
+    );
+    assertError(idCard, 429, "RATE_LIMITED");
+    assert.equal(idCard.body.error.details.tier, "fileLink");
   });
 
   test("GET /badge-requests: the unit's managers get the open queue with meta; a member is 403; a bad status is 400", async () => {

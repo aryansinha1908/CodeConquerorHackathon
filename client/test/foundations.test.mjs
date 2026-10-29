@@ -1166,6 +1166,25 @@ test('preparePhotos keeps at most the room left and says what was left out', asy
   assert.deepEqual(toPhotoRefs([{ ...PHOTO_A, extra: 1 }, { url: 'x' }, null]), [PHOTO_A]);
 });
 
+test('preparePhotos never hands one upload more than POST /uploads/images takes (3), even with room for 5', async () => {
+  // The listing form allows 5 photos; the server refuses a request with more than 3 files.
+  const { preparePhotos, MAX_PHOTOS } = await load('/src/features/uploads/api.js');
+  const same = async (file) => file;
+  const five = ['1', '2', '3', '4', '5'].map((n) => jpeg(`${n}.jpg`));
+  const { files, notes } = await preparePhotos(five, { room: 5, compress: same });
+  assert.equal(MAX_PHOTOS, 3);
+  assert.deepEqual(files.map((f) => f.name), ['1.jpg', '2.jpg', '3.jpg']);
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /At most 3 photos go up at a time, so 2 were left out\. Add them once these are in\./);
+  const four = await preparePhotos(five.slice(0, 4), { room: 4, compress: same });
+  assert.equal(four.files.length, 3);
+  assert.match(four.notes[0], /so 1 was left out\. Add it once these are in\./);
+  // Room is still the tighter limit when it is smaller.
+  const two = await preparePhotos(five, { room: 2, compress: same });
+  assert.equal(two.files.length, 2);
+  assert.match(two.notes[0], /Only 2 more photos fit, so 3 were left out/);
+});
+
 // ── BookingTimeline ───────────────────────────────────────────────────────────
 
 test('BookingTimeline shows each kind with its actor, IST time and reason', async () => {
@@ -1323,25 +1342,6 @@ test('the booking and manage pages are built: each shows its loading state, neve
   assert.equal(placeholders.BookingsPlaceholder, undefined, 'the old bookings placeholder is gone');
 });
 
-test('the incident links lead to a page that says it is being built, with a way back', async () => {
-  // "Report an issue" (ActionBar) and "Open the incident" (BookingTimeline) link here before the
-  // incident pages exist; without a route they fell through to the catch-all and landed on Explore.
-  const { IncidentPlaceholder } = await load('/src/pages/Placeholders.jsx');
-  const report = await render((React) => React.createElement(IncidentPlaceholder, { kind: 'report' }), {
-    path: '/incidents/new?bookingId=b%201',
-  });
-  assert.match(report, /<h1[^>]*>Report an issue<\/h1>/);
-  assert.match(text(report), /This page is being built/);
-  assert.match(report, /href="\/bookings\/b%201"[^>]*>Back to the booking</);
-
-  const detail = await render((React) => React.createElement(IncidentPlaceholder, { kind: 'detail' }), {
-    path: '/incidents/inc-1',
-  });
-  assert.match(detail, /<h1[^>]*>Incident<\/h1>/);
-  assert.match(text(detail), /This page is being built/);
-  assert.match(detail, /href="\/bookings"[^>]*>Back to My bookings</);
-});
-
 test('the router maps the booking and manage paths to their pages', async () => {
   // createBrowserRouter reads window.location and document.defaultView; give it just enough.
   const win = {
@@ -1367,7 +1367,6 @@ test('the router maps the booking and manage paths to their pages', async () => 
   try {
     const { router } = await load('/src/app/router.jsx');
     const pages = await load('/src/components/LazyPages.jsx');
-    const placeholders = await load('/src/pages/Placeholders.jsx');
     const { matchRoutes } = await import('react-router-dom');
     const leaf = (path) => {
       const matches = matchRoutes(router.routes, path);
@@ -1395,27 +1394,24 @@ test('the router maps the booking and manage paths to their pages', async () => 
     assert.equal(leaf('/explore').element.type, pages.ExplorePage);
     assert.equal(leaf('/verification').element.type, pages.VerificationPage);
     assert.equal(leaf('/admin/verifications').element.type, pages.VerificationQueuePage);
-    assert.equal(leaf('/manage/badges').path, '*', '/manage/badges is left to its owner');
-    // The manage pages not built yet say so under the layout's h1, as level-2 placeholders.
-    for (const path of ['/manage/resources', '/manage/incidents', '/manage/incidents/inc-1']) {
-      const unbuilt = leaf(path);
-      assert.equal(unbuilt.element.type, placeholders.PagePlaceholder, path);
-      assert.equal(unbuilt.element.props.level, 2, path);
-    }
-    // The incident links have a page (a placeholder for now) instead of the catch-all to Explore.
-    const report = leaf('/incidents/new');
-    assert.equal(report.element.type, placeholders.IncidentPlaceholder);
-    assert.equal(report.element.props.kind, 'report');
-    const incident = leaf('/incidents/inc-1');
-    assert.equal(incident.element.type, placeholders.IncidentPlaceholder);
-    assert.equal(incident.element.props.kind, 'detail');
-    // /manage opens the review queue rather than a landing that calls it unbuilt.
-    const { Navigate } = await import('react-router-dom');
-    const manage = matchRoutes(router.routes, '/manage');
-    const index = manage[manage.length - 1].route;
-    assert.equal(index.index, true);
-    assert.equal(index.element.type, Navigate);
-    assert.equal(index.element.props.to, 'requests');
+    // Phase 4b pages.
+    assert.equal(leaf('/manage').element.type, pages.DashboardPage);
+    assert.equal(leaf('/manage/resources').element.type, pages.ResourcesPage);
+    const newResource = leaf('/manage/resources/new');
+    assert.equal(newResource.element.type, pages.ResourceFormPage);
+    assert.equal(newResource.element.props.mode, 'new');
+    const editResource = leaf('/manage/resources/r1/edit');
+    assert.equal(editResource.element.props.mode, 'edit');
+    assert.deepEqual(editResource.params, { id: 'r1' });
+    assert.notEqual(newResource.element.key, editResource.element.key, 'new and edit mount their own form');
+    assert.equal(leaf('/manage/badges').element.type, pages.BadgeRequestsPage);
+    assert.equal(leaf('/manage/incidents').element.props.scope, 'manage');
+    assert.equal(leaf('/admin/incidents').element.props.scope, 'admin');
+    for (const path of ['/incidents/inc-1', '/manage/incidents/inc-1', '/admin/incidents/inc-1'])
+      assert.equal(leaf(path).element.type, pages.IncidentDetailPage, path);
+    assert.equal(leaf('/incidents/new').element.type, pages.ReportIncidentPage);
+    assert.equal(leaf('/admin/audit').element.type, pages.AuditPage);
+    assert.equal(leaf('/notifications').element.type, pages.NotificationsPage);
   } finally {
     if (!had.window) delete globalThis.window;
     if (!had.document) delete globalThis.document;

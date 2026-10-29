@@ -16,25 +16,28 @@ import VerifyOtpPage from '../features/auth/VerifyOtpPage';
 
 // Lazy loaded pages (declared in components/LazyPages.jsx, a components-only module)
 import {
+  AuditPage,
+  BadgeRequestsPage,
   BookingDetailPage,
+  DashboardPage,
   ExplorePage,
   HandoverPage,
   HandoversPage,
+  IncidentDetailPage,
+  IncidentListPage,
   LazyPage,
   MyBookingsPage,
+  NotificationsPage,
+  ReportIncidentPage,
   RequestsPage,
   ResourceDetailPage,
+  ResourceFormPage,
+  ResourcesPage,
   ReturnConfirmPage,
   VerificationPage,
   VerificationQueuePage,
 } from '../components/LazyPages';
-import {
-  AdminPlaceholder,
-  BadgesPlaceholder,
-  IncidentPlaceholder,
-  ManagePlaceholder,
-  PagePlaceholder,
-} from '../pages/Placeholders';
+import { AdminPlaceholder, BadgesPlaceholder, ManagePlaceholder } from '../pages/Placeholders';
 
 // A lazy page inside the shared loading fallback.
 const page = (element) => <LazyPage>{element}</LazyPage>;
@@ -96,11 +99,10 @@ export const router = createBrowserRouter([
 
       { path: '/badges', element: page(<BadgesPlaceholder />) },
 
-      // ── Incidents (frontend.md §6.2), not built yet ───────────────────────
-      // "Report an issue" and the history's "Open the incident" link here; without these routes
-      // they fell through to the catch-all and landed on Explore without a word.
-      { path: '/incidents/new', element: page(<IncidentPlaceholder kind="report" />) },
-      { path: '/incidents/:id', element: page(<IncidentPlaceholder kind="detail" />) },
+      // ── Incidents (frontend.md §6.2) and notifications ───────────────────
+      { path: '/incidents/new', element: page(<ReportIncidentPage />) },
+      { path: '/incidents/:id', element: page(<IncidentDetailPage />) },
+      { path: '/notifications', element: page(<NotificationsPage />) },
 
       // ── Manager sub-routes ────────────────────────────────────────────────
       {
@@ -111,37 +113,16 @@ export const router = createBrowserRouter([
           </RequireRole>
         ),
         children: [
-          // No dashboard yet (frontend.md §6.3): open the review queue.
-          { index: true, element: <Navigate to="requests" replace /> },
+          { index: true, element: page(<DashboardPage />) },
           { path: 'requests', element: page(<RequestsPage />) },
           { path: 'handovers', element: page(<HandoversPage />) },
           { path: 'returns/:bookingId', element: page(<ReturnConfirmPage />) },
-          {
-            path: 'resources',
-            element: page(
-              <PagePlaceholder
-                level={2}
-                eyebrow="Unit resources"
-                title="Your unit's resources"
-                description="Adding and editing the resources of your units, their rules and closures."
-                backTo="/manage/requests"
-                backLabel="Back to the review queue"
-              />
-            ),
-          },
-          {
-            path: 'incidents/*',
-            element: page(
-              <PagePlaceholder
-                level={2}
-                eyebrow="Incidents"
-                title="Incidents"
-                description="Incidents in your units, with their threads and the resolve dialog."
-                backTo="/manage/handovers"
-                backLabel="Back to handovers"
-              />
-            ),
-          },
+          { path: 'resources', element: page(<ResourcesPage />) },
+          { path: 'resources/new', element: page(<ResourceFormPage key="new" mode="new" />) },
+          { path: 'resources/:id/edit', element: page(<ResourceFormPage key="edit" mode="edit" />) },
+          { path: 'incidents', element: page(<IncidentListPage key="manage" scope="manage" />) },
+          { path: 'incidents/:id', element: page(<IncidentDetailPage />) },
+          { path: 'badges', element: page(<BadgeRequestsPage />) },
           {
             path: '*',
             element: <ManagePlaceholder />,
@@ -163,6 +144,9 @@ export const router = createBrowserRouter([
             element: <AdminPlaceholder />,
           },
           { path: 'verifications', element: page(<VerificationQueuePage />) },
+          { path: 'audit', element: page(<AuditPage />) },
+          { path: 'incidents', element: page(<IncidentListPage key="admin" scope="admin" />) },
+          { path: 'incidents/:id', element: page(<IncidentDetailPage />) },
           {
             path: '*',
             element: <AdminPlaceholder />,

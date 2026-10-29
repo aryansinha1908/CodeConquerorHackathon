@@ -1,11 +1,12 @@
-// /api/v1/admin (architecture.md §6 Verification; the user routes come in Phase 3). Each service
-// checks the admin role itself, from the database rather than the token, so a revoked admin is
-// refused at once.
+// /api/v1/admin (architecture.md §6 Verification and Admin): the ID-card verification queue and the
+// user list. Each service checks the admin role itself, from the database rather than the token, so
+// a revoked admin is refused at once.
 import express from "express";
 import { verifyAuth } from "../middleware/auth.js";
 import { blockSuspended } from "../middleware/blockSuspended.js";
-import { generalLimiter } from "../middleware/rateLimit.js";
+import { fileLinkLimiter, generalLimiter } from "../middleware/rateLimit.js";
 import { sendData, sendList } from "../lib/respond.js";
+import { listUsers } from "../services/userService.js";
 import {
   decideVerification,
   getIdCardUrl,
@@ -22,11 +23,13 @@ router.get("/verifications", verifyAuth, generalLimiter, async (req, res) => {
 });
 
 // A 5-minute signed link to the ID card; each call is audited. The link is a credential, so the
-// answer must not be cached by the browser or a proxy.
+// answer must not be cached by the browser or a proxy. fileLinkLimiter: each link costs a Cloudinary
+// Admin API call, and the count is shared with the badge evidence link.
 router.get(
   "/verifications/:userId/id-card",
   verifyAuth,
   generalLimiter,
+  fileLinkLimiter,
   async (req, res) => {
     const link = await getIdCardUrl(req.user.id, req.params.userId, {
       requestId: req.id,
@@ -53,5 +56,13 @@ router.patch(
     );
   },
 );
+
+// ── Users ───────────────────────────────────────────────────────────────────
+
+// ?q (name or email)&role&verification&page&limit → users, newest first, for the org-unit manager
+// picker. Admins only; a demo admin sees demo accounts only.
+router.get("/users", verifyAuth, generalLimiter, async (req, res) => {
+  sendList(req, res, await listUsers(req.user.id, req.query));
+});
 
 export default router;

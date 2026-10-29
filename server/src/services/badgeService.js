@@ -7,6 +7,12 @@
 // a revocation or an expiry reuses the row, and the audit log keeps every earlier decision.
 // As with bookings, nobody but an admin decides on their own request or grants themselves a badge.
 //
+// A demo account works only on demo accounts: anyone can become the demo manager or admin with one
+// click and no password, on the deployment where real members hold badges that unlock real equipment.
+// For a demo manager or admin a real member's request isn't in the queue and can't be decided (404,
+// as if it didn't exist), and granting to a real member reads as no such member, by id or by email,
+// so the grant form can't be used to find out who has an account (verificationService does the same).
+//
 // The catalogue is one shared cache entry, cache:badges (architecture.md §10). It stores each issuer
 // as an id; names come from the org unit catalogue at read time, so a unit rename needs no badge
 // invalidation. Holdings are per user and never cached, so a decision shows in the eligibility
@@ -29,10 +35,11 @@ import {
   requireUnitManager,
 } from "./access.js";
 import { record } from "./auditService.js";
+import { DEMO_EMAIL, isDemoAccount } from "./authService.js";
 import { cachedCatalogue, invalidateCatalogue } from "./cacheService.js";
 import { send } from "./notifyService.js";
 import { listOrgUnits } from "./orgUnitService.js";
-import { discardAsset } from "./uploadService.js";
+import { discardAsset, signedUrl } from "./uploadService.js";
 import {
   absent,
   assertValid,
@@ -73,6 +80,7 @@ const LOCKED = {
 const DECISIONS = ["approve", "reject"];
 const MAX_TEXT = 500;
 const MAX_PUBLIC_ID = 255;
+const MAX_EMAIL = 254; // User.email
 
 // What the issuer, the member and the queue need to say about the badge.
 const BADGE_REF = {
@@ -429,6 +437,62 @@ export async function releaseEvidence(publicId) {
   return used ? false : discardAsset(publicId, "evidence");
 }
 
+// GET /badge-requests/:id/evidence → { url, expiresAt }: a link to the request's evidence file that
+// stops working within 5 minutes, like the admin's link to an ID card (verificationService). For the
+// issuing unit's managers and admins, who review it, and for the member who sent it. Every link
+// handed out is audited as "badge.evidence_viewed", so the unit can see who opened a certificate.
+//
+// A demo account opens only demo accounts' evidence: anyone can become the demo manager or admin with
+// one click and no password, on the same deployment where real members send real certificates. A
+// real member's file then answers 404, the same as a request that doesn't exist, as for ID cards.
+// No file on the row (none was sent, or a later request came without one) is 404 too.
+export async function getEvidenceUrl(
+  viewerId,
+  userBadgeId,
+  { requestId, now = new Date() } = {},
+) {
+  if (!isId(userBadgeId)) throw notFound("Badge request");
+  const [viewer, row] = await Promise.all([
+    requireUser(viewerId),
+    UserBadge.findById(userBadgeId, { user: 1, badge: 1, evidence: 1 })
+      .populate("badge", "orgUnit")
+      .populate("user", "email")
+      .lean(),
+  ]);
+  if (!row?.badge || !row.user) throw notFound("Badge request");
+  const own = sameId(viewer._id, row.user._id);
+  const manages = managesUnit(viewer, row.badge.orgUnit);
+  if (!own && !manages)
+    throw forbidden(
+      "Only the issuing unit's managers or the member who sent it can open this evidence.",
+    );
+  if (!own && isDemoAccount(viewer) && !isDemoAccount(row.user))
+    throw notFound("Badge request");
+
+  const noFile = () => notFound("Evidence");
+  const publicId = row.evidence?.publicId;
+  if (!publicId) throw noFile();
+  const link = await signedUrl(publicId, "evidence", { now });
+  if (!link) throw noFile();
+
+  await record({
+    actor: {
+      id: viewer._id,
+      role: manages ? auditRole(viewer, row.badge.orgUnit) : "member",
+    },
+    action: "badge.evidence_viewed",
+    entity: { type: "user_badge", id: row._id },
+    orgUnit: row.badge.orgUnit,
+    meta: {
+      badge: row.badge._id,
+      user: row.user._id,
+      expiresAt: link.expiresAt,
+    },
+    requestId,
+  });
+  return link;
+}
+
 // ── Manager side ────────────────────────────────────────────────────────────
 
 // The rows a viewer may see in the queue: an admin every badge's, a manager their units' badges'.
@@ -452,7 +516,8 @@ async function queueScope(viewer, badgeId) {
 
 // GET /badge-requests (managers of the issuing unit, or admins). query: { status = "requested",
 // badgeId?, page, limit } → { items, meta: { page, limit, total } }. Open requests come oldest first,
-// like the booking queue; decided rows come newest decision first.
+// like the booking queue; decided rows come newest decision first. A demo account sees only demo
+// members' rows.
 export async function listBadgeRequests(
   viewerId,
   query = {},
@@ -467,7 +532,11 @@ export async function listBadgeRequests(
   const { page, limit } = readPaging(query, problems);
   assertValid(problems, "parameter");
 
-  const filter = { ...(await queueScope(viewer, badgeId)), status };
+  const filter = {
+    ...(await queueScope(viewer, badgeId)),
+    ...(isDemoAccount(viewer) && { user: { $in: await demoUserIds() } }),
+    status,
+  };
   const [rows, total] = await Promise.all([
     withMember(
       UserBadge.find(filter)
@@ -487,6 +556,14 @@ export async function listBadgeRequests(
   };
 }
 
+// The demo accounts' ids, for a demo viewer's queue (see the top of this file).
+const demoUserIds = async () =>
+  (await User.find({ email: DEMO_EMAIL }, { _id: 1 }).lean()).map((u) => u._id);
+
+// Whether `viewer` may act on `member` ({ email }): a demo account only on demo accounts.
+const mayActOn = (viewer, member) =>
+  !isDemoAccount(viewer) || isDemoAccount(member);
+
 function refuseOwn(actor, userId, message) {
   if (sameId(actor._id, userId) && !isAdmin(actor)) throw forbidden(message);
 }
@@ -498,7 +575,8 @@ const grantedData = (badge, expiresAt) => ({
 
 // PATCH /badge-requests/:id (managers of the issuing unit, or admins). input: { decision: "approve" |
 // "reject", reason } with reason required to reject. Approving makes the badge active until now +
-// validityDays (or for good). Throws 400, 403, 404, or 409 INVALID_TRANSITION once it is decided.
+// validityDays (or for good). Throws 400, 403, 404 (for a demo account, a real member's request too),
+// or 409 INVALID_TRANSITION once it is decided.
 // → the row as listBadgeRequests shows it.
 export async function decideBadgeRequest(
   viewerId,
@@ -520,6 +598,10 @@ export async function decideBadgeRequest(
     badge.orgUnit,
     "Only the issuing unit's managers can decide this request.",
   );
+  if (isDemoAccount(manager)) {
+    const member = await User.findById(row.user, { email: 1 }).lean();
+    if (!member || !mayActOn(manager, member)) throw notFound("Badge request");
+  }
   refuseOwn(
     manager,
     row.user,
@@ -578,11 +660,51 @@ export async function decideBadgeRequest(
   return managerView(await loadQueueRow(row._id), now);
 }
 
+// A blank text value counts as not sent, as everywhere else.
+const sent = (value) =>
+  !absent(typeof value === "string" ? value.trim() : value);
+
+// Who a grant is for: { userId } or { email }, exactly one. The email lets a manager grant after an
+// induction without a user list to pick from; it matches the stored address exactly, which is always
+// lower-case, so the comparison ignores case. With neither, both fields say "Required.", so a form
+// with either input marks it. → { find (the User filter), path (the field to blame) }, or undefined
+// after pushing a problem.
+function readGrantee(input, problems) {
+  const byId = sent(input.userId);
+  const byEmail = sent(input.email);
+  if (!byId && !byEmail) {
+    problems.push(
+      { path: "userId", message: "Required." },
+      { path: "email", message: "Required." },
+    );
+    return undefined;
+  }
+  if (byId && byEmail) {
+    problems.push({
+      path: "email",
+      message: "Send either userId or email, not both.",
+    });
+    return undefined;
+  }
+  if (byId) {
+    const userId = readId(input.userId, "userId", problems);
+    return userId && { find: { _id: userId }, path: "userId" };
+  }
+  const email = readText(input.email, "email", problems, { max: MAX_EMAIL });
+  return email && { find: { email: email.toLowerCase() }, path: "email" };
+}
+
+const NO_SUCH_MEMBER = {
+  userId: "No such user.",
+  email: "No account has this email.",
+};
+
 // POST /badges/:id/grant (managers of the issuing unit, or admins), e.g. after an in-person induction.
-// input: { userId, note? }. Any row (none, an open request, rejected, revoked, expired, or held with an
-// expiry to renew) becomes active until now + validityDays; regranting a held badge that never
+// input: { userId | email, note? }. Any row (none, an open request, rejected, revoked, expired, or held
+// with an expiry to renew) becomes active until now + validityDays; regranting a held badge that never
 // expires changes nothing and isn't audited. The member's own request note is kept; the manager's note
-// goes to the audit log. Throws 400 (including an unknown userId), 403 or 404.
+// goes to the audit log. Throws 400 (including an unknown userId or email, and for a demo account a
+// real member's), 403 or 404.
 // → the row as listBadgeRequests shows it.
 export async function grantBadge(
   viewerId,
@@ -604,13 +726,13 @@ export async function grantBadge(
 
   if (!isPlainObject(input)) throw invalid("Send the grant as an object.");
   const problems = [];
-  const userId = readId(input.userId, "userId", problems);
-  if (absent(input.userId))
-    problems.push({ path: "userId", message: "Required." });
+  const grantee = readGrantee(input, problems);
   const note = readText(input.note, "note", problems, { max: MAX_TEXT });
   assertValid(problems, "field");
-  const member = await User.findById(userId, { _id: 1 }).lean();
-  if (!member) throw fieldError("userId", "No such user.");
+  const member = await User.findOne(grantee.find, { _id: 1, email: 1 }).lean();
+  // A real member is no member at all for a demo account (see the top of this file).
+  if (!member || !mayActOn(manager, member))
+    throw fieldError(grantee.path, NO_SUCH_MEMBER[grantee.path]);
   refuseOwn(
     manager,
     member._id,

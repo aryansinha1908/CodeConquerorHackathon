@@ -189,7 +189,7 @@ export function PhotoUploader({
     const run = ++runRef.current;
     setNotes([]);
     setAnnouncement('');
-    setBatch({ phase: 'preparing', count: Math.min(room, picked.length) });
+    setBatch({ phase: 'preparing', count: Math.min(room, MAX_PHOTOS, picked.length) });
     const { files, notes: found } = await preparePhotos(picked, { room, compress });
     if (run !== runRef.current) return;
     setNotes(found);

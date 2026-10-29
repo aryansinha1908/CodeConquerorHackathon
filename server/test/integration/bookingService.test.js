@@ -7,6 +7,7 @@ import {
   Booking,
   ConditionReport,
   Incident,
+  Resource,
   User,
   UserBadge,
 } from "../../src/models/index.js";
@@ -16,6 +17,7 @@ import {
   checkIn,
   checkOut,
   confirmReturn,
+  createBooking,
   getBooking,
   getTimeline,
   listForManager,
@@ -198,6 +200,121 @@ describe("bookingService", { skip }, () => {
         weekly.details[0].message,
         "You've used 2 of 3 hours this week on this resource.",
       );
+    });
+
+    test("purpose is checked before the eligibility work, with the slot's problems, and stored trimmed", async () => {
+      // An ineligible member hears about the purpose first: 400, not 422 and then 400.
+      await UserBadge.deleteMany({ user: f.student._id });
+      const short = await failure(book(f.student, TUE, { purpose: "Print" }));
+      assert.deepEqual(
+        [short.status, short.code, short.details],
+        [
+          400,
+          "VALIDATION_ERROR",
+          [{ path: "purpose", message: "Must be at least 10 characters." }],
+        ],
+      );
+      const cases = [
+        [{ purpose: undefined }, "Required."],
+        [{ purpose: "   " }, "Required."],
+        [{ purpose: 42 }, "Must be text."],
+        [{ purpose: "x".repeat(301) }, "Can be at most 300 characters."],
+      ];
+      for (const [extra, message] of cases) {
+        const err = await failure(book(f.student2, TUE, extra));
+        assert.deepEqual(err.details, [{ path: "purpose", message }]);
+      }
+      // Every problem at once, before the resource is even looked up.
+      const all = await failure(
+        createBooking(
+          f.student2._id,
+          { resourceId: "printer", start: "soon", purpose: "Print" },
+          opts,
+        ),
+      );
+      assert.deepEqual(
+        all.details.map((d) => d.path),
+        ["start", "end", "purpose"],
+      );
+      assert.equal(await Booking.countDocuments(), 0);
+      assert.equal(await AuditLog.countDocuments(), 0);
+
+      const { booking } = await book(f.student2, TUE, {
+        purpose: "  Printing a gearbox for the robotics club  ",
+      });
+      assert.equal(booking.purpose, "Printing a gearbox for the robotics club");
+    });
+
+    test('only true or "true" joins the waitlist: other values never queue the member', async () => {
+      await book(f.student);
+      // "false" was truthy before: it joined the waitlist.
+      for (const joinWaitlist of [false, "false", null, ""]) {
+        const err = await failure(book(f.student2, TUE, { joinWaitlist }));
+        assert.equal(err.code, "SLOT_TAKEN", JSON.stringify(joinWaitlist));
+      }
+      for (const joinWaitlist of ["yes", 1, "1", {}, ["true"]]) {
+        const err = await failure(book(f.student2, TUE, { joinWaitlist }));
+        assert.deepEqual(
+          [err.status, err.details],
+          [400, [{ path: "joinWaitlist", message: "Must be true or false." }]],
+          JSON.stringify(joinWaitlist),
+        );
+      }
+      assert.equal(await Booking.countDocuments({ status: "waitlisted" }), 0);
+
+      const joined = await book(f.student2, TUE, { joinWaitlist: "true" });
+      assert.deepEqual(
+        [joined.booking.status, joined.waitlistPosition],
+        ["waitlisted", 1],
+      );
+    });
+
+    test("an archived resource is 404 to check or request, except for its unit's managers", async () => {
+      const { booking } = await book(f.student);
+      await Resource.updateOne({ _id: f.printer._id }, { status: "archived" });
+      for (const who of [f.student2, f.cseManager]) {
+        for (const attempt of [
+          () =>
+            checkBooking(
+              who._id,
+              { resourceId: f.printer._id, ...TUE_LATER },
+              opts,
+            ),
+          () => book(who, TUE_LATER),
+        ]) {
+          const err = await failure(attempt());
+          assert.deepEqual(
+            [err.status, err.code, err.message],
+            [404, "NOT_FOUND", "Resource not found."],
+          );
+        }
+      }
+
+      // The unit's managers (and admins) still get the checklist, which says why.
+      for (const who of [f.manager, f.admin]) {
+        const check = await checkBooking(
+          who._id,
+          { resourceId: f.printer._id, ...TUE_LATER },
+          opts,
+        );
+        const rule = check.results.find((r) => r.rule === "RESOURCE_ACTIVE");
+        assert.deepEqual(
+          [check.outcome, rule.passed, rule.message],
+          ["ineligible", false, "This resource is no longer available."],
+        );
+      }
+      const refused = await failure(book(f.manager, TUE_LATER));
+      assert.equal(refused.code, "INELIGIBLE");
+
+      // A booking made before the archive can still be dealt with.
+      const cancelled = await transition(
+        booking._id,
+        "cancel",
+        f.student._id,
+        {},
+        opts,
+      );
+      assert.equal(cancelled.status, "cancelled");
     });
   });
 
@@ -707,6 +824,51 @@ describe("bookingService", { skip }, () => {
         (await failure(listForManager(f.student._id, {}))).code,
         "FORBIDDEN",
       );
+    });
+
+    test("the pending queue reads at most 500 requests and says so in meta.capped", async () => {
+      // 501 pending requests on separate slots, each its own group, written straight to the
+      // collection: the service would refuse that many from three members.
+      const pendingAt = (i) => ({
+        resource: f.kits._id,
+        orgUnit: f.dic._id,
+        borrower: f.student._id,
+        start: plus(TUE.start, i * 60),
+        end: plus(TUE.start, i * 60 + 30),
+        purpose: "Inserted by hand for the test",
+        status: "pending",
+        createdAt: plus(NOW, -1000 + i),
+      });
+      await Booking.insertMany(
+        Array.from({ length: 500 }, (_, i) => pendingAt(i)),
+      );
+      const full = await listForManager(f.manager._id, { status: "pending" });
+      assert.deepEqual(full.meta, {
+        page: 1,
+        limit: 20,
+        total: 500,
+        capped: false,
+      });
+
+      await Booking.create(pendingAt(500));
+      const over = await listForManager(f.manager._id, {
+        status: "pending",
+        page: 25,
+      });
+      assert.deepEqual(over.meta, {
+        page: 25,
+        limit: 20,
+        total: 500,
+        capped: true,
+      });
+      // The oldest 500 are the ones shown; the newest waits for the queue to shrink.
+      assert.equal(
+        over.groups.at(-1).bookings[0].start.getTime(),
+        plus(TUE.start, 499 * 60).getTime(),
+      );
+      // Other statuses are a plain count, never capped.
+      const list = await listForManager(f.manager._id, { status: "approved" });
+      assert.equal("capped" in list.meta, false);
     });
 
     test("list queries are checked: bad values are 400, limit is capped, an unknown user is 404", async () => {

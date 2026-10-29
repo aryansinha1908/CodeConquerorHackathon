@@ -8,6 +8,7 @@
 //   API router:     requireAuth → generalLimiter → routes        (needs req.user)
 //   refresh/logout: refreshCookieUser → refreshLimiter             (needs req.refreshUserId)
 //   POST /bookings: bookingCreateLimiter;  upload routes: uploadLimiter
+//   private file links (badge evidence, ID cards): fileLinkLimiter, after generalLimiter
 import { rateLimit } from "express-rate-limit";
 import { log } from "../config/redis.js";
 import { keys } from "../lib/redisKeys.js";
@@ -61,12 +62,22 @@ function byDemoRole(req) {
   return role;
 }
 
+// The login route sets res.locals.passwordMatched on 403 EMAIL_NOT_VERIFIED: the password was right,
+// so it isn't a failed attempt. Counting it would lock out a member who signs in a few times before
+// finding the code in their inbox, and it guards nothing: only the password holder gets that answer.
+const PASSWORD_MATCHED = "passwordMatched";
+export const markPasswordMatched = (res) => {
+  res.locals[PASSWORD_MATCHED] = true;
+};
+
 export const TIERS = {
   login: {
     windowMs: 15 * MINUTE,
     limit: 5,
     key: byEmail,
     skipSuccessfulRequests: true, // only failed attempts count
+    succeeded: (_req, res) =>
+      res.statusCode < 400 || res.locals[PASSWORD_MATCHED] === true,
     message: (wait) =>
       `Too many failed login attempts for this account. Try again in ${wait}.`,
   },
@@ -126,6 +137,16 @@ export const TIERS = {
     message: (wait) =>
       `You've uploaded 20 files in the last hour. Try again in ${wait}.`,
   },
+  // Each signed link to a private file costs a Cloudinary Admin API call (config/cloudinary.js), and
+  // that hourly quota is shared by everyone: without this, one member opening their own evidence in
+  // a loop could stop every reviewer opening ID cards and certificates.
+  fileLink: {
+    windowMs: 15 * MINUTE,
+    limit: 20,
+    key: byUser,
+    message: (wait) =>
+      `You've opened 20 files in the last 15 minutes. Try again in ${wait}.`,
+  },
 };
 
 const secondsUntil = (date) =>
@@ -139,6 +160,8 @@ export function createLimiter(tierName, overrides = {}) {
     limit: tier.limit,
     keyGenerator: tier.key,
     skipSuccessfulRequests: tier.skipSuccessfulRequests ?? false,
+    // What "successful" means for skipSuccessfulRequests; the library's default is status < 400.
+    ...(tier.succeeded && { requestWasSuccessful: tier.succeeded }),
     skip: tier.skip,
     standardHeaders: "draft-7", // RateLimit headers, plus Retry-After on a 429
     legacyHeaders: false,
@@ -173,6 +196,30 @@ export const otpSendLimiter = [
   createLimiter("otpSend"),
   createLimiter("otpSendDaily"),
 ];
+// A code emailed by another route (an unverified login sends one) counts against resend-otp's two
+// counters, in the same order as otpSendLimiter, so no path emails an address more often than
+// resend-otp may. The login tier can't cap it: that 403 isn't a failed attempt (markPasswordMatched).
+// → false once either tier is used up: send nothing. Fails open like the limiters; with Redis down
+// the code couldn't be issued anyway.
+const otpSendCounters = ["otpSend", "otpSendDaily"].map((tierName) => {
+  const store = new RedisRateLimitStore({
+    prefix: keys.rateLimitPrefix(tierName),
+  });
+  store.init({ windowMs: TIERS[tierName].windowMs });
+  return { store, limit: TIERS[tierName].limit };
+});
+
+export async function takeOtpSend(email) {
+  const key = String(email).trim().toLowerCase();
+  try {
+    for (const { store, limit } of otpSendCounters)
+      if ((await store.increment(key)).totalHits > limit) return false;
+  } catch (err) {
+    log.warn({ err }, "Couldn't count an OTP email; sending it unlimited");
+  }
+  return true;
+}
+
 export const otpVerifyLimiter = createLimiter("otpVerify");
 export const demoLimiter = createLimiter("demo");
 export const generalLimiter = createLimiter("general");
@@ -184,3 +231,5 @@ export const refreshLimiter = createLimiter("general", {
 });
 export const bookingCreateLimiter = createLimiter("bookingCreate");
 export const uploadLimiter = createLimiter("upload");
+// One counter for GET /badge-requests/:id/evidence and GET /admin/verifications/:userId/id-card.
+export const fileLinkLimiter = createLimiter("fileLink");

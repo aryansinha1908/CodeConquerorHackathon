@@ -6,6 +6,7 @@ import { setRedisLogger, useRedisClient } from "../../src/config/redis.js";
 import {
   TIERS,
   createLimiter,
+  markPasswordMatched,
   otpSendLimiter,
 } from "../../src/middleware/rateLimit.js";
 
@@ -44,9 +45,15 @@ app.use((req, _res, next) => {
 const ok = (_req, res) => res.json({ success: true });
 
 app.get("/general", createLimiter("general", { limit: 3 }), ok);
-app.post("/login", createLimiter("login", { limit: 3 }), (req, res) =>
-  res.status(req.body.password === "right" ? 200 : 401).json({}),
-);
+// "unverified": the right password on an account whose email isn't verified, which the real route
+// answers 403 EMAIL_NOT_VERIFIED after marking the response.
+app.post("/login", createLimiter("login", { limit: 3 }), (req, res) => {
+  if (req.body.password === "unverified") {
+    markPasswordMatched(res);
+    return res.status(403).json({});
+  }
+  return res.status(req.body.password === "right" ? 200 : 401).json({});
+});
 app.post(
   "/otp",
   createLimiter("otpSend", { limit: 2, windowMs: 150 }),
@@ -170,6 +177,30 @@ describe("per-email limits on auth routes", () => {
     );
   });
 
+  test("the right password on an unverified account isn't a failed attempt; a plain 403 still is", async () => {
+    const attempt = (password) => async () => {
+      const res = await post("/login", {
+        email: "2024ugcs999@nitjsr.ac.in",
+        password,
+      });
+      await sleep(20); // the count is taken back after the response finishes
+      return res;
+    };
+    assert.deepEqual(
+      await statuses(Array.from({ length: 5 }, () => attempt("unverified"))),
+      [403, 403, 403, 403, 403],
+    );
+    assert.deepEqual(
+      await statuses([
+        attempt("wrong"),
+        attempt("wrong"),
+        attempt("wrong"),
+        attempt("unverified"),
+      ]),
+      [401, 401, 401, 429],
+    );
+  });
+
   test("the email is normalised, so case and spaces don't give extra attempts", async () => {
     const emails = [
       "2024UGCS999@nitjsr.ac.in",
@@ -267,9 +298,21 @@ describe("tiers match architecture.md §11", () => {
         general: [300, 5],
         bookingCreate: [10, 60],
         upload: [20, 60],
+        fileLink: [20, 15],
       },
     );
     assert.equal(TIERS.login.skipSuccessfulRequests, true);
+    // Only the marked 403 counts as a success besides status < 400.
+    const res = (statusCode, locals = {}) => ({ statusCode, locals });
+    assert.deepEqual(
+      [
+        TIERS.login.succeeded({}, res(200)),
+        TIERS.login.succeeded({}, res(401)),
+        TIERS.login.succeeded({}, res(403)),
+        TIERS.login.succeeded({}, res(403, { passwordMatched: true })),
+      ],
+      [true, false, false, true],
+    );
     assert.equal(otpSendLimiter.length, 2);
   });
 

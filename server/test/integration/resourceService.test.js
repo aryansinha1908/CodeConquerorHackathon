@@ -1002,6 +1002,81 @@ describe("resourceService", { skip }, () => {
         "VALIDATION_ERROR",
       );
     });
+
+    test("images must be photos uploaded through /uploads/images, on create and on edit", async (t) => {
+      const saved = process.env.CLOUDINARY_CLOUD_NAME;
+      process.env.CLOUDINARY_CLOUD_NAME = "campus-test";
+      t.after(() => {
+        if (saved === undefined) delete process.env.CLOUDINARY_CLOUD_NAME;
+        else process.env.CLOUDINARY_CLOUD_NAME = saved;
+      });
+      const ours = {
+        publicId: "campuscommons/photos/bench",
+        url: "https://res.cloudinary.com/campus-test/image/upload/v1730000000/campuscommons/photos/bench.jpg",
+      };
+      const elsewhere = {
+        publicId: "bench",
+        url: "https://example.com/bench.jpg",
+      };
+      // Another public id's URL, and one with a transformation that could fetch from elsewhere.
+      const borrowed = { ...ours, publicId: "campuscommons/photos/other" };
+      const transformed = {
+        ...ours,
+        url: "https://res.cloudinary.com/campus-test/image/upload/l_fetch:aHR0cHM6Ly9ldmlsLmV4YW1wbGU=/campuscommons/photos/bench.jpg",
+      };
+      const photoMessage = "Must be a photo uploaded through /uploads/images.";
+
+      const created = await createResource(
+        f.manager._id,
+        form({ images: [ours] }),
+      );
+      assert.deepEqual(created.images, [ours]);
+
+      const refusedCreate = await refused(
+        createResource(
+          f.manager._id,
+          form({ title: "Hot Air Station", images: [ours, elsewhere] }),
+        ),
+        400,
+        "VALIDATION_ERROR",
+      );
+      assert.deepEqual(refusedCreate.details, [
+        { path: "images.1", message: photoMessage },
+      ]);
+      assert.equal(await Resource.countDocuments(), 3);
+
+      // On edit too, each entry marked once: a non-object is "Must be an object." only.
+      const refusedEdit = await refused(
+        updateResource(f.manager._id, created._id, {
+          images: [borrowed, null, transformed, ours],
+        }),
+        400,
+        "VALIDATION_ERROR",
+      );
+      assert.deepEqual(refusedEdit.details, [
+        { path: "images.1", message: "Must be an object." },
+        { path: "images.0", message: photoMessage },
+        { path: "images.2", message: photoMessage },
+      ]);
+      assert.deepEqual(
+        (await Resource.findById(created._id).lean()).images.map((i) => i.url),
+        [ours.url],
+      );
+      // Clearing them, or sending none, needs no check.
+      const cleared = await updateResource(f.manager._id, created._id, {
+        images: null,
+      });
+      assert.deepEqual(cleared.images, []);
+
+      // Without Cloudinary configured nothing can have been uploaded, so no image is accepted.
+      delete process.env.CLOUDINARY_CLOUD_NAME;
+      const unconfigured = await refused(
+        updateResource(f.manager._id, created._id, { images: [ours] }),
+        400,
+        "VALIDATION_ERROR",
+      );
+      assert.deepEqual(pathsOf(unconfigured), ["images.0"]);
+    });
   });
 
   describe("updateResource", () => {

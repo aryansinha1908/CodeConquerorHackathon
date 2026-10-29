@@ -18,6 +18,7 @@ import bcrypt from "bcryptjs";
 import { sendMail } from "../config/mailer.js";
 import { log } from "../lib/log.js";
 import { ServiceError } from "../lib/serviceError.js";
+import { takeOtpSend } from "../middleware/rateLimit.js";
 import { User } from "../models/index.js";
 import { record } from "./auditService.js";
 import {
@@ -463,8 +464,9 @@ async function passwordMatches(password, hash, userId) {
 }
 
 // POST /auth/login → a session. An unverified email is 403 EMAIL_NOT_VERIFIED with a fresh code, unless
-// one went out in the last minute: that code still works, and replacing it would break the email the
-// user is reading. That also caps this path, which resend-otp's limiter doesn't cover, at a mail a minute.
+// one went out in the last minute (that code still works, and replacing it would break the email the
+// user is reading) or resend-otp's limits for the address are used up: this path counts against them
+// (takeOtpSend), since the login tier doesn't count this 403 and registering needs no inbox.
 export async function login(input) {
   const { email, password } = readLoginInput(input);
   const user = await loadUser({ email }, { withPassword: true });
@@ -478,14 +480,17 @@ export async function login(input) {
   if (!user || !comparable || !matches) throw invalidCredentials();
 
   if (!user.emailVerified) {
-    if (!(await sentWithin(email, OTP_RETRY_AFTER_SECONDS)))
-      await sendCode(user);
-    const err = new ServiceError(
-      403,
-      "EMAIL_NOT_VERIFIED",
-      "Verify your email first. We've sent a 6-digit code to your inbox.",
-      { email },
-    );
+    let message =
+      "Verify your email first. We've sent a 6-digit code to your inbox.";
+    if (!(await sentWithin(email, OTP_RETRY_AFTER_SECONDS))) {
+      if (await takeOtpSend(email)) await sendCode(user);
+      else
+        message =
+          "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later.";
+    }
+    const err = new ServiceError(403, "EMAIL_NOT_VERIFIED", message, {
+      email,
+    });
     // The right password: this browser may enter the code. The route sets it as a cookie; the error
     // handler only ever sends status, code, message and details.
     err.signupProof = signupProof(user);

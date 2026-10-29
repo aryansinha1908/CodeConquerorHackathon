@@ -84,8 +84,9 @@ export async function preparePhoto(picked, compress) {
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * Picked files → { files, notes }: at most `room` photos prepared for upload (preparePhoto) and a
- * note for each one left out (not an image, no room, too big). Files keep the order picked.
+ * Picked files → { files, notes }: at most `room` photos, and never more than one POST
+ * /uploads/images takes (MAX_PHOTOS), prepared for upload (preparePhoto), and a note for each one
+ * left out (not an image, no room, over the per-upload limit, too big). Files keep the order picked.
  */
 export async function preparePhotos(picked, { room, compress }) {
   const list = Array.from(picked ?? []);
@@ -96,13 +97,18 @@ export async function preparePhotos(picked, { room, compress }) {
     else notes.push(`${file?.name || 'A file'} isn't a photo, so it was left out.`);
   }
   const space = Math.max(0, Number(room) || 0);
-  const chosen = images.slice(0, space);
+  // A form with room for more (a listing takes 5) still sends at most 3 in one request.
+  const perUpload = Math.min(space, MAX_PHOTOS);
+  const chosen = images.slice(0, perUpload);
   if (images.length > chosen.length) {
     const left = images.length - chosen.length;
+    const was = plural(left, 'was', 'were');
     notes.push(
       space === 0
         ? 'There is no room for more photos. Remove one to add another.'
-        : `Only ${plural(space, 'more photo fits', 'more photos fit')}, so ${plural(left, 'was', 'were')} left out.`
+        : space > MAX_PHOTOS
+          ? `At most ${MAX_PHOTOS} photos go up at a time, so ${was} left out. Add ${left === 1 ? 'it' : 'them'} once these are in.`
+          : `Only ${plural(space, 'more photo fits', 'more photos fit')}, so ${was} left out.`
     );
   }
   const files = [];

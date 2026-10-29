@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { AlarmClock, ArrowLeft, ClipboardList, History } from 'lucide-react';
+import { AlarmClock, ArrowLeft, ClipboardList, FileText, History } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth';
 import { BookingTimeline } from '../../components/BookingTimeline';
 import { Card } from '../../components/ui/Card';
@@ -24,6 +24,7 @@ import {
 } from './components/bookingView';
 import { eyebrowClass, pageHeadingClass, sectionHeadingClass, textLinkClass } from './components/styles';
 import { useNow, useRefetchAt } from './components/useClock';
+import { auditPath, isAdmin } from '../incidents/components/incidentView';
 
 // /bookings/:id (frontend.md §6.2): StatusBadge, the decision reason, the action bar from
 // allowedActions, the condition reports and the BookingTimeline. GET /bookings/:id and
@@ -316,6 +317,18 @@ export default function BookingDetailPage() {
               <History className="w-5 h-5" aria-hidden="true" />
               History
             </h2>
+            {/* Judge step 12: the admin's audit log, filtered to this booking. */}
+            {isAdmin(user) && (
+              <p className="text-sm">
+                <Link
+                  to={auditPath('booking', booking._id ?? id)}
+                  className={`${textLinkClass} inline-flex items-center gap-1`}
+                >
+                  <FileText className="w-4 h-4" aria-hidden="true" />
+                  Audit log for this booking
+                </Link>
+              </p>
+            )}
             {timelineQuery.isPending && <HistorySkeleton />}
             {timelineQuery.isError && (
               <ErrorState

@@ -14,6 +14,15 @@ export const HandoverPage = lazy(() => import('../features/bookings/HandoverPage
 export const RequestsPage = lazy(() => import('../features/manage/RequestsPage'));
 export const HandoversPage = lazy(() => import('../features/manage/HandoversPage'));
 export const ReturnConfirmPage = lazy(() => import('../features/manage/ReturnConfirmPage'));
+export const DashboardPage = lazy(() => import('../features/manage/DashboardPage'));
+export const ResourcesPage = lazy(() => import('../features/manage/ResourcesPage'));
+export const ResourceFormPage = lazy(() => import('../features/manage/ResourceFormPage'));
+export const BadgeRequestsPage = lazy(() => import('../features/manage/BadgeRequestsPage'));
+export const ReportIncidentPage = lazy(() => import('../features/incidents/ReportIncidentPage'));
+export const IncidentDetailPage = lazy(() => import('../features/incidents/IncidentDetailPage'));
+export const IncidentListPage = lazy(() => import('../features/incidents/IncidentListPage'));
+export const AuditPage = lazy(() => import('../features/admin/AuditPage'));
+export const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
 
 export function PageFallback() {
   return (

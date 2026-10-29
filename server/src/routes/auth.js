@@ -13,6 +13,7 @@ import {
   demoLimiter,
   generalLimiter,
   loginLimiter,
+  markPasswordMatched,
   otpSendLimiter,
   otpVerifyLimiter,
   refreshLimiter,
@@ -127,8 +128,12 @@ router.post(
     try {
       session = await login(req.body);
     } catch (err) {
-      // 403 EMAIL_NOT_VERIFIED after the right password: this browser may enter the code.
-      if (err?.signupProof) setSignupProof(res, err.signupProof);
+      // 403 EMAIL_NOT_VERIFIED after the right password: this browser may enter the code, and the
+      // login tier doesn't count it as a failed attempt.
+      if (err?.signupProof) {
+        setSignupProof(res, err.signupProof);
+        markPasswordMatched(res);
+      }
       throw err;
     }
     sendSession(req, res, session);

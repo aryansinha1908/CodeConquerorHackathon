@@ -9,6 +9,7 @@ import app from "../../src/app.js";
 import { useMailTransport } from "../../src/config/mailer.js";
 import { useRedisClient } from "../../src/config/redis.js";
 import logger from "../../src/lib/logger.js";
+import { TTL, keys } from "../../src/lib/redisKeys.js";
 import { User } from "../../src/models/index.js";
 import { redis, skip, useTestDatabase } from "../integration/fixtures.js";
 
@@ -363,6 +364,62 @@ describe("/api/v1/auth", { skip }, () => {
       email: "meera.iyer@nitjsr.ac.in",
       otp: codeFor("meera.iyer@nitjsr.ac.in"),
     });
+    assert.equal(session.status, 200);
+  });
+
+  test("login: the right password on an unverified account isn't counted as a failed attempt", async () => {
+    await post("/register", {
+      name: "Meera Iyer",
+      email: "meera.iyer@nitjsr.ac.in",
+      password: PASSWORD,
+    });
+    const login = async (password) => {
+      const res = await post("/login", {
+        email: "meera.iyer@nitjsr.ac.in",
+        password,
+      });
+      // The limiter takes the count back once the response has finished.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return res;
+    };
+    // More than the 5 failures a window allows, and none of them is a 429.
+    for (let i = 0; i < 6; i++)
+      assertEnvelopeError(await login(PASSWORD), 403, "EMAIL_NOT_VERIFIED");
+    // A wrong password still counts: 5 of them, then the 6th attempt of any kind is 429.
+    for (let i = 0; i < 5; i++)
+      assertEnvelopeError(
+        await login("wrong-pass1"),
+        401,
+        "INVALID_CREDENTIALS",
+      );
+    assertEnvelopeError(await login(PASSWORD), 429, "RATE_LIMITED");
+  });
+
+  test("login emails a code only while resend-otp's tiers allow it, and counts against them", async () => {
+    const email = "tara.menon@nitjsr.ac.in";
+    await post("/register", { name: "Tara Menon", email, password: PASSWORD });
+    const sentTo = () => mails.filter((m) => m.to === email).length;
+    // Someone who knows the password signs in every minute and a bit: each time the last code is
+    // over a minute old, which used to send another one, with no limit per address.
+    const replies = [];
+    for (let i = 0; i < 5; i++) {
+      await redis.expire(keys.otp(email), TTL.otpSeconds - 61);
+      replies.push(await post("/login", { email, password: PASSWORD }));
+    }
+    for (const res of replies)
+      assertEnvelopeError(res, 403, "EMAIL_NOT_VERIFIED");
+    // The sign-up's code, then 3 from login: otpSend allows 3 in 15 minutes.
+    assert.equal(sentTo(), 4);
+    assert.equal(
+      replies.at(-1).body.error.message,
+      "Verify your email first. Enter the last code we sent to your inbox, or ask for a new one later.",
+    );
+    // The same counter as resend-otp: it is used up too.
+    const resend = await post("/resend-otp", { email });
+    assertEnvelopeError(resend, 429, "RATE_LIMITED");
+    assert.equal(resend.body.error.details.tier, "otpSend");
+    // The last code still works.
+    const session = await post("/verify-otp", { email, otp: codeFor(email) });
     assert.equal(session.status, 200);
   });
 

@@ -946,6 +946,15 @@ test('booking detail: a manager sees the borrower and the links to the queue and
   assert.match(text(returned), /Confirm the return/);
 });
 
+test('booking detail: an admin gets the audit log filtered to this booking (judge step 12); others do not', async () => {
+  const admin = { ...MANAGER, _id: 'admin-1', name: 'Asha Admin', roles: ['member', 'admin'], managedOrgUnits: [] };
+  const html = await renderDetail(detailBooking(), { user: admin });
+  assert.match(html, /<a[^>]*href="\/admin\/audit\?entityType=booking&amp;entityId=b1"[^>]*>.*Audit log for this booking<\/a>/s);
+  for (const user of [BORROWER, MANAGER]) {
+    assert.doesNotMatch(await renderDetail(detailBooking(), { user }), /\/admin\/audit/, user.name);
+  }
+});
+
 test('booking detail: loading, and a 404 with the message, request id, retry and a way back', async () => {
   const loading = await renderDetail(null, { timeline: null });
   assert.match(loading, /aria-busy="true"/);

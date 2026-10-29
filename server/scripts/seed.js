@@ -1,20 +1,27 @@
 // `npm run seed` (backend.md §9 and B-22): the 18 NIT Jamshedpur org units, the badge catalogue,
-// sample resources and the demo users the judges log in as. The data is in seedData.js.
+// sample resources, the demo users the judges log in as, and their bookings in every status. The data
+// is in seedData.js; the bookings are told as stories in seedBookings.js.
 //
 // Idempotent: org units are matched by code, badges by code, users by email and resources by unit
 // and title. Each run puts every field seedData.js defines back to its value and leaves everything
-// else alone, so a second run writes nothing, and a run after a demo resets the golden path
+// else alone, so a second run writes nothing there, and a run after a demo resets the golden path
 // (frontend.md §11): the student lacks 3D Printing Basics again, the printer is active again.
-// Nothing that isn't seed data is deleted. The one delete is a demo user's badge row that the spec
-// doesn't give them (the audit log keeps it).
+// The demo bookings are the exception: each run removes the ones the last run seeded and makes them
+// again from the new now, so "upcoming" stays upcoming (seedBookings.js). Nothing else that isn't
+// seed data is deleted. The other delete is a demo user's badge row that the spec doesn't give them
+// (the audit log keeps it).
 //
 // Managers go through setOrgUnitManagers, the only writer of OrgUnit.managers and
 // User.managedOrgUnits (progress.md §6.8), so the two stay in sync and a unit's real managers stay.
 // The seed's own writes bypass the services, so it audits them as the system and then clears the
 // caches they feed (progress.md §6.9): cache:orgunits, cache:badges and the resource caches.
 //
-// Usage: cd server && npm run seed. Needs MONGODB_URI and SEED_PASSWORD (server/.env); REDIS_URL is
-// optional here, since without Redis the caches simply expire within their TTL (architecture.md §10).
+// Usage: cd server && npm run seed. Needs MONGODB_URI and SEED_PASSWORD (server/.env). REDIS_URL is
+// optional: without Redis the caches simply expire within their TTL (architecture.md §10), but the
+// demo bookings are skipped, because creating and approving a booking takes the Redis resource lock.
+// Run it while the API is stopped or idle: the bookings' history is written with past timestamps,
+// and a sweep running in between could move a booking on before its story does (it is then skipped
+// with a warning; run the seed again).
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import bcrypt from "bcryptjs";
@@ -38,6 +45,7 @@ import {
   invalidateCatalogue,
 } from "../src/services/cacheService.js";
 import { setOrgUnitManagers } from "../src/services/orgUnitService.js";
+import { seedBookings } from "./seedBookings.js";
 import {
   BADGES,
   DEMO_USERS,
@@ -445,8 +453,16 @@ async function refreshCaches(units, badges) {
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 // Expects MongoDB (and, if it's to clear caches, Redis) to be connected already. `now` is for tests.
-// → per collection, how many documents were created, updated or left unchanged.
-export async function seed({ password, log = appLog, now = new Date() } = {}) {
+// bookings: false leaves the demo bookings as they are (the CLI passes it when Redis is down, since
+// booking needs the lock).
+// → per collection, how many documents were created, updated or left unchanged; for bookings, how
+// many earlier seeded ones were removed and how many were made (or skipped, with a warning).
+export async function seed({
+  password,
+  log = appLog,
+  now = new Date(),
+  bookings = true,
+} = {}) {
   const problem = passwordProblem(password);
   if (problem) throw new Error(problem);
   const counts = {
@@ -456,6 +472,7 @@ export async function seed({ password, log = appLog, now = new Date() } = {}) {
     managedUnits: { changed: 0, unchanged: 0 },
     resources: tally(),
     userBadges: { ...tally(), removed: 0 },
+    ...(bookings && { bookings: { removed: 0, created: 0, skipped: 0 } }),
   };
 
   const units = await seedOrgUnits(counts.orgUnits);
@@ -472,6 +489,11 @@ export async function seed({ password, log = appLog, now = new Date() } = {}) {
   await seedHoldings(users, badges, admin, now, counts.userBadges);
   log.info(`Badge holdings: ${describeTally(counts.userBadges)}`);
   await refreshCaches(units, badges);
+  // Last: the stories need the units' managers, the resources and the borrowers' badges in place.
+  if (bookings) {
+    counts.bookings = await seedBookings({ now, log });
+    log.info(`Demo bookings: ${describeTally(counts.bookings)}`);
+  }
   return counts;
 }
 
@@ -565,13 +587,21 @@ async function main() {
   try {
     const connection = await connectDb();
     console.log(`Seeding the "${connection.name}" database.`);
-    if (!(await connectRedis())) {
+    const redisUp = await connectRedis();
+    if (!redisUp) {
       cliLog.warn(
         "Caches can't be cleared without Redis; cached lists and catalogues expire within 10 minutes.",
       );
+      cliLog.warn(
+        "Demo bookings skipped: booking takes the Redis resource lock. Set REDIS_URL and run the seed again.",
+      );
       cliLog.muteCacheWarnings();
     }
-    await seed({ password: env.SEED_PASSWORD, log: cliLog });
+    await seed({
+      password: env.SEED_PASSWORD,
+      log: cliLog,
+      bookings: redisUp,
+    });
     console.log(
       `Done. Demo logins: ${DEMO_USERS.map((u) => demoEmail(u.login)).join(", ")} (password: SEED_PASSWORD).`,
     );

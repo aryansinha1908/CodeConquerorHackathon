@@ -264,19 +264,28 @@ describe("/api/v1/bookings", { skip }, () => {
         ["waitlisted", 1],
       );
 
-      // A field the model refuses: 400 with the field in details.
+      // The purpose is checked with the rest of the body, before the eligibility work: 400 with the
+      // field in details. A joinWaitlist that isn't true or false is refused, never read as true.
       const later = futureSlot("13:00", "15:00");
       const short = refused(
         await call("POST", "/bookings", {
           user: f.student3,
-          json: { ...body, ...later, purpose: "Print" },
+          json: { ...body, ...later, purpose: "Print", joinWaitlist: "yes" },
         }),
         400,
         "VALIDATION_ERROR",
       );
-      assert.deepEqual(
-        short.details.map((d) => d.path),
-        ["purpose"],
+      assert.deepEqual(short.details, [
+        { path: "purpose", message: "Must be at least 10 characters." },
+        { path: "joinWaitlist", message: "Must be true or false." },
+      ]);
+      refused(
+        await call("POST", "/bookings", {
+          user: f.student3,
+          json: { ...body, joinWaitlist: "false" },
+        }),
+        409,
+        "SLOT_TAKEN",
       );
 
       // A failed rule: 422 with the rule, as the envelope example shows.
@@ -367,7 +376,13 @@ describe("/api/v1/bookings", { skip }, () => {
         user: f.manager,
       });
       const groups = ok(res);
-      assert.deepEqual(res.body.meta, { page: 1, limit: 20, total: 1 });
+      // capped: false says the queue was read whole (it reads at most the 500 oldest requests).
+      assert.deepEqual(res.body.meta, {
+        page: 1,
+        limit: 20,
+        total: 1,
+        capped: false,
+      });
       assert.equal(groups.length, 1);
       assert.deepEqual(Object.keys(groups[0]).sort(), [
         "bookings",
@@ -691,11 +706,13 @@ describe("/api/v1/bookings", { skip }, () => {
 
     test("a bad or missing start or end is reported on its own field, before the resource is read", async () => {
       const { end } = futureSlot();
+      // A good purpose, so only the slot is wrong (POST /bookings reports every field at once).
+      const purpose = PURPOSE;
       for (const path of ["/bookings/check", "/bookings"]) {
         const garbage = refused(
           await call("POST", path, {
             user: f.student,
-            json: { resourceId: f.printer._id, start: "garbage", end },
+            json: { resourceId: f.printer._id, start: "garbage", end, purpose },
           }),
           400,
           "VALIDATION_ERROR",
@@ -704,7 +721,7 @@ describe("/api/v1/bookings", { skip }, () => {
         const missing = refused(
           await call("POST", path, {
             user: f.student,
-            json: { resourceId: f.printer._id },
+            json: { resourceId: f.printer._id, purpose },
           }),
           400,
           "VALIDATION_ERROR",
@@ -884,10 +901,12 @@ describe("/api/v1/bookings", { skip }, () => {
         const res = await call("GET", `/bookings/mine?${query}`, {
           user: f.student,
         });
-        assert.deepEqual(ok(res).map((b) => b.status).sort(), [
-          "approved",
-          "pending",
-        ]);
+        assert.deepEqual(
+          ok(res)
+            .map((b) => b.status)
+            .sort(),
+          ["approved", "pending"],
+        );
         assert.equal(res.body.meta.total, 2);
       }
       const bad = refused(

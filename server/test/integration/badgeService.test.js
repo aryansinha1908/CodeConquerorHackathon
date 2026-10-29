@@ -1,7 +1,8 @@
 // Badge service against a real MongoDB; see fixtures.js for how to run it.
-import { describe, test } from "node:test";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import { useUploader } from "../../src/config/cloudinary.js";
 import { keys } from "../../src/lib/redisKeys.js";
 import { DAY } from "../../src/lib/time.js";
 import {
@@ -15,6 +16,7 @@ import {
   badgeState,
   createBadge,
   decideBadgeRequest,
+  getEvidenceUrl,
   grantBadge,
   listBadgeRequests,
   listBadges,
@@ -793,11 +795,13 @@ describe("badgeService", { skip }, () => {
       assert.deepEqual(unknown.details, [
         { path: "userId", message: "No such user." },
       ]);
+      // Neither userId nor email: both say "Required.", so a form with either input marks it.
       const missing = await failure(
-        grantBadge(f.manager._id, laser._id, {}, { now: NOW }),
+        grantBadge(f.manager._id, laser._id, { email: "  " }, { now: NOW }),
       );
       assert.deepEqual(missing.details, [
         { path: "userId", message: "Required." },
+        { path: "email", message: "Required." },
       ]);
       assertError(
         await failure(
@@ -809,6 +813,302 @@ describe("badgeService", { skip }, () => {
         "NOT_FOUND",
       );
       assert.equal(await UserBadge.countDocuments({ badge: laser._id }), 1);
+    });
+
+    test("grants by email instead of userId: an exact match that ignores case", async () => {
+      await addBadges();
+      const byEmail = (who, email, extra = {}) =>
+        grantBadge(who._id, laser._id, { email, ...extra }, { now: NOW });
+      const row = await byEmail(
+        f.manager,
+        "  Student@DEMO.campuscommons.test ",
+      );
+      assert.deepEqual(
+        [row.user._id, row.state],
+        [String(f.student._id), "active"],
+      );
+      assert.equal(
+        "email" in row.user,
+        false,
+        "the row never carries an email",
+      );
+      const [entry] = await audits("badge.granted");
+      assert.equal(String(entry.meta.user), String(f.student._id));
+
+      const cases = [
+        [
+          { email: "nobody@demo.campuscommons.test" },
+          "No account has this email.",
+        ],
+        // A part of an address finds nothing: the match is exact, not a search.
+        [{ email: "student2@demo" }, "No account has this email."],
+        [{ email: 42 }, "Must be text."],
+        [
+          { email: `${"a".repeat(250)}@x.test` },
+          "Can be at most 254 characters.",
+        ],
+        [
+          { email: "student2@demo.campuscommons.test", userId: f.student2._id },
+          "Send either userId or email, not both.",
+        ],
+      ];
+      for (const [input, message] of cases) {
+        const err = await failure(
+          grantBadge(f.manager._id, laser._id, input, { now: NOW }),
+        );
+        assertError(err, 400, "VALIDATION_ERROR");
+        assert.deepEqual(err.details, [{ path: "email", message }]);
+      }
+      // The same rules as by id: never to yourself, never for another unit's badge.
+      assertError(
+        await failure(byEmail(f.manager, "manager@demo.campuscommons.test")),
+        403,
+        "FORBIDDEN",
+      );
+      assertError(
+        await failure(
+          grantBadge(
+            f.cseManager._id,
+            laser._id,
+            { email: "student2@demo.campuscommons.test" },
+            { now: NOW },
+          ),
+        ),
+        403,
+        "FORBIDDEN",
+      );
+      assert.equal(await UserBadge.countDocuments({ badge: laser._id }), 1);
+    });
+  });
+
+  // The fixtures' manager and admin are the public demo accounts: one click, no password, on the
+  // same deployment where real members hold real badges.
+  describe("demo accounts and real members", () => {
+    const realPeople = async () => {
+      await addBadges();
+      const member = await User.create({
+        name: "Rohan Mehta",
+        email: "2024ugcs999@nitjsr.ac.in",
+        passwordHash: "x".repeat(60),
+        memberType: "ug",
+        department: f.cse._id,
+        verification: { status: "approved" },
+      });
+      const realManager = await User.create({
+        name: "Priya Nair",
+        email: "priya.nair@nitjsr.ac.in",
+        passwordHash: "x".repeat(60),
+        memberType: "faculty",
+        roles: ["member", "manager"],
+        managedOrgUnits: [f.dic._id],
+        verification: { status: "approved" },
+      });
+      return { member, realManager };
+    };
+
+    test("a demo manager or admin can't grant to a real member, by email or by id: it reads as no such member", async () => {
+      const { member, realManager } = await realPeople();
+      for (const who of [f.manager, f.admin]) {
+        const byEmail = await failure(
+          grantBadge(
+            who._id,
+            laser._id,
+            { email: "2024UGCS999@nitjsr.ac.in" },
+            { now: NOW },
+          ),
+        );
+        assertError(byEmail, 400, "VALIDATION_ERROR");
+        assert.deepEqual(byEmail.details, [
+          { path: "email", message: "No account has this email." },
+        ]);
+        const byId = await failure(grant(who, laser, member));
+        assertError(byId, 400, "VALIDATION_ERROR");
+        assert.deepEqual(byId.details, [
+          { path: "userId", message: "No such user." },
+        ]);
+      }
+      assert.equal(await UserBadge.countDocuments({ user: member._id }), 0);
+      assert.equal((await audits("badge.granted")).length, 0);
+      assert.equal((await notificationsFor(member)).length, 0);
+      // A real manager of the unit can, and the demo accounts still grant to each other.
+      const row = await grantBadge(
+        realManager._id,
+        laser._id,
+        { email: member.email },
+        { now: NOW },
+      );
+      assert.equal(row.state, "active");
+      assert.equal((await grant(f.manager, laser, f.student)).state, "active");
+    });
+
+    test("a demo manager or admin never sees or decides a real member's request", async () => {
+      const { member, realManager } = await realPeople();
+      const real = await request(member, f.badge, { note: "Inducted" });
+      const demo = await request(f.student, laser, { evidence: EVIDENCE });
+      for (const who of [f.manager, f.admin]) {
+        const { items, meta } = await listBadgeRequests(who._id);
+        assert.deepEqual(
+          items.map((r) => r._id),
+          [demo._id],
+        );
+        assert.equal(meta.total, 1);
+        const err = await failure(decide(who, real, { decision: "approve" }));
+        assertError(err, 404, "NOT_FOUND");
+        assert.equal(err.message, "Badge request not found.");
+      }
+      assert.equal((await rowOf(member, f.badge)).status, "requested");
+      assert.equal((await audits("badge.granted")).length, 0);
+      // The unit's real manager sees both and decides the real one.
+      assert.equal((await listBadgeRequests(realManager._id)).meta.total, 2);
+      const decided = await decide(realManager, real, { decision: "approve" });
+      assert.equal(decided.state, "active");
+    });
+  });
+
+  describe("getEvidenceUrl", () => {
+    let fake;
+    beforeEach(() => {
+      fake = {
+        signed: [],
+        async signedUrl(publicId, { type, expiresAt }) {
+          fake.signed.push({ publicId, type });
+          return `https://api.cloudinary.com/v1_1/test/image/download?public_id=${encodeURIComponent(publicId)}&expires_at=${Math.floor(expiresAt.getTime() / 1000)}`;
+        },
+        async destroy() {
+          return { deleted: true };
+        },
+      };
+      useUploader(fake);
+    });
+    afterEach(() => useUploader(null));
+
+    const open = (who, row) =>
+      getEvidenceUrl(who._id, row._id, { now: NOW, requestId: "req-ev" });
+
+    test("the issuing unit's managers, admins and the member who sent it get a 5-minute link; each is audited", async () => {
+      await addBadges();
+      const row = await request(f.student, laser, { evidence: EVIDENCE });
+
+      const link = await open(f.manager, row);
+      assert.deepEqual(Object.keys(link).sort(), ["expiresAt", "url"]);
+      assert.equal(link.expiresAt.getTime(), NOW.getTime() + 5 * 60_000);
+      assert.deepEqual(fake.signed, [
+        { publicId: EVIDENCE.publicId, type: "authenticated" },
+      ]);
+      await open(f.student, row);
+      await open(f.admin, row);
+
+      const views = await audits("badge.evidence_viewed");
+      assert.deepEqual(
+        views.map((v) => [String(v.actor.id), v.actor.role]),
+        [
+          [String(f.manager._id), "manager"],
+          [String(f.student._id), "member"],
+          [String(f.admin._id), "admin"],
+        ],
+      );
+      for (const view of views) {
+        assert.deepEqual(view.entity, {
+          type: "user_badge",
+          id: new mongoose.Types.ObjectId(row._id),
+        });
+        assert.equal(String(view.orgUnit), String(f.dic._id));
+        assert.equal(String(view.meta.user), String(f.student._id));
+        assert.equal(String(view.meta.badge), String(laser._id));
+        assert.equal(view.requestId, "req-ev");
+      }
+    });
+
+    test("anyone else is refused, and no link or audit entry is made", async () => {
+      await addBadges();
+      const row = await request(f.student, laser, { evidence: EVIDENCE });
+      for (const who of [f.cseManager, f.student2]) {
+        const err = await failure(open(who, row));
+        assertError(err, 403, "FORBIDDEN");
+        assert.equal(
+          err.message,
+          "Only the issuing unit's managers or the member who sent it can open this evidence.",
+        );
+      }
+      // A manager role without the unit, or the unit without the role, isn't enough.
+      await User.updateOne(
+        { _id: f.student2._id },
+        { managedOrgUnits: [f.dic._id] },
+      );
+      assertError(await failure(open(f.student2, row)), 403, "FORBIDDEN");
+      assert.equal(fake.signed.length, 0);
+      assert.equal((await audits("badge.evidence_viewed")).length, 0);
+    });
+
+    test("a demo account never opens a real member's evidence; a real admin and the member do", async () => {
+      await addBadges();
+      const member = await User.create({
+        name: "Rohan Mehta",
+        email: "2024ugcs999@nitjsr.ac.in",
+        passwordHash: "x".repeat(60),
+        memberType: "ug",
+        department: f.cse._id,
+        verification: { status: "approved" },
+      });
+      const realAdmin = await User.create({
+        name: "Priya Nair",
+        email: "priya.nair@nitjsr.ac.in",
+        passwordHash: "x".repeat(60),
+        roles: ["admin"],
+        verification: { status: "approved" },
+      });
+      const row = await request(member, laser, { evidence: EVIDENCE });
+      // The fixtures' manager and admin are the public demo accounts.
+      for (const who of [f.manager, f.admin]) {
+        const err = await failure(open(who, row));
+        assertError(err, 404, "NOT_FOUND");
+        assert.equal(err.message, "Badge request not found.");
+      }
+      assert.equal(fake.signed.length, 0);
+      assert.ok(await open(realAdmin, row));
+      assert.ok(await open(member, row));
+      assert.equal((await audits("badge.evidence_viewed")).length, 2);
+    });
+
+    test("no evidence, a file Cloudinary no longer has, and unknown ids are 404s; no Cloudinary is 503", async () => {
+      await addBadges();
+      const plainRow = await request(f.student, gpu, { note: "No file" });
+      const none = await failure(open(f.cseManager, plainRow));
+      assertError(none, 404, "NOT_FOUND");
+      assert.equal(none.message, "Evidence not found.");
+
+      const row = await request(f.student, laser, { evidence: EVIDENCE });
+      fake.signedUrl = async () => null;
+      assert.equal(
+        (await failure(open(f.manager, row))).message,
+        "Evidence not found.",
+      );
+      for (const id of [
+        "not-an-id",
+        new mongoose.Types.ObjectId(),
+        { $ne: null },
+      ]) {
+        const err = await failure(
+          getEvidenceUrl(f.manager._id, id, { now: NOW }),
+        );
+        assert.deepEqual(
+          [err.status, err.message],
+          [404, "Badge request not found."],
+        );
+      }
+      useUploader(null);
+      const saved = process.env.CLOUDINARY_CLOUD_NAME;
+      delete process.env.CLOUDINARY_CLOUD_NAME;
+      try {
+        assertError(
+          await failure(open(f.manager, row)),
+          503,
+          "SERVICE_UNAVAILABLE",
+        );
+      } finally {
+        if (saved !== undefined) process.env.CLOUDINARY_CLOUD_NAME = saved;
+      }
+      assert.equal((await audits("badge.evidence_viewed")).length, 0);
     });
   });
 

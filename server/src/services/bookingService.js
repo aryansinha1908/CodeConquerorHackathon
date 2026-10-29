@@ -31,6 +31,7 @@ import {
   Incident,
   User,
 } from "../models/index.js";
+import { managesUnit } from "./access.js";
 import { record } from "./auditService.js";
 import {
   eligibilityContext,
@@ -55,6 +56,7 @@ import {
   isPlainObject,
   readEnum,
   readEnumList,
+  readFlag,
   readId,
   readInstant,
   readPaging,
@@ -65,7 +67,11 @@ import { promoteFreedSlot, snapshot } from "./waitlistService.js";
 
 export { SYSTEM };
 
+// The pending view groups requests in memory, so it reads at most this many (the oldest); meta.capped
+// says when there were more, rather than the queue quietly looking shorter than it is.
 const QUEUE_CAP = 500;
+// Booking.purpose, checked by the service so the member hears about it before the eligibility work.
+const PURPOSE = { min: 10, max: 300 };
 // decision.reason and cancellation.reason (backend.md §7 bookings.reject / waitlist / cancel).
 const MAX_REASON = 500;
 // A return note is the report's notes and the audit entry's reason, both at most 1000.
@@ -84,14 +90,36 @@ const fromCheck = (check) =>
 
 // start and end, checked before anything is loaded: an unparsed start would otherwise reach the
 // overlap query and come back as a CastError on `end`.
-function readSlot(input) {
-  const problems = [];
-  const slot = {
+function slotOf(input, problems) {
+  return {
     start: readInstant(input.start, "start", problems, { required: true }),
     end: readInstant(input.end, "end", problems, { required: true }),
   };
+}
+
+function readSlot(input) {
+  const problems = [];
+  const slot = slotOf(input, problems);
   assertValid(problems);
   return slot;
+}
+
+// The whole POST /bookings body, before the resource is loaded or locked. purpose used to reach only
+// the model, after every rule had passed, so a member with a short purpose heard about it last.
+// joinWaitlist goes through readFlag: only true or "true" joins. "false" used to join by being
+// truthy; any value that is neither is now a 400 rather than a guess.
+function readRequest(input) {
+  const problems = [];
+  const request = {
+    ...slotOf(input, problems),
+    purpose: readText(input.purpose, "purpose", problems, {
+      ...PURPOSE,
+      required: true,
+    }),
+    joinWaitlist: readFlag(input.joinWaitlist, "joinWaitlist", problems),
+  };
+  assertValid(problems);
+  return request;
 }
 const managersOf = (resource) => resource.orgUnit?.managers ?? [];
 
@@ -101,6 +129,21 @@ async function requireResource(resourceId) {
   const resource = isId(resourceId) ? await loadResource(resourceId) : null;
   if (!resource) throw notFound("Resource");
   return resource;
+}
+
+// The member and the resource they check or request a slot on. An archived resource is 404 for
+// anyone but its unit's managers, as on every resource read (resourceService's rule), so the check
+// and the request don't reveal what GET /resources/:id hides. Its managers still get the checklist,
+// where RESOURCE_ACTIVE says why it can't be booked. Decisions, handovers and returns on existing
+// bookings use requireResource alone: those must go on after a resource is archived.
+async function requesterAndResource(userId, resourceId) {
+  const [user, resource] = await Promise.all([
+    requireUser(userId),
+    requireResource(resourceId),
+  ]);
+  if (resource.status === "archived" && !managesUnit(user, resource.orgUnit))
+    throw notFound("Resource");
+  return [user, resource];
 }
 
 async function requireBooking(bookingId) {
@@ -143,10 +186,7 @@ function ineligible(evaluation) {
 // POST /bookings/check: the evaluation POST /bookings enforces, without creating anything.
 export async function checkBooking(userId, input, { now = new Date() } = {}) {
   const slot = readSlot(input);
-  const [user, resource] = await Promise.all([
-    requireUser(userId),
-    requireResource(input.resourceId),
-  ]);
+  const [user, resource] = await requesterAndResource(userId, input.resourceId);
   const ctx = await eligibilityContext(user, resource, slot, { now });
   const evaluation = evaluate(user, resource, slot, ctx);
   return {
@@ -156,27 +196,24 @@ export async function checkBooking(userId, input, { now = new Date() } = {}) {
   };
 }
 
-// POST /bookings → { booking, evaluation, waitlistPosition }
-// Throws 422 INELIGIBLE, 409 SLOT_TAKEN (unless joinWaitlist) or 503 when the lock is unavailable.
+// POST /bookings. input: { resourceId, start, end, purpose (10–300), joinWaitlist? }
+// → { booking, evaluation, waitlistPosition }
+// Throws 400 (the body), 404, 422 INELIGIBLE, 409 SLOT_TAKEN (unless joinWaitlist) or 503 when the
+// lock is unavailable.
 export async function createBooking(
   userId,
   input,
   { now = new Date(), requestId } = {},
 ) {
-  const slot = readSlot(input);
-  const [user, resource] = await Promise.all([
-    requireUser(userId),
-    requireResource(input.resourceId),
-  ]);
+  const { purpose, joinWaitlist, ...slot } = readRequest(input);
+  const [user, resource] = await requesterAndResource(userId, input.resourceId);
 
   const { booking, evaluation, position } = await withLock(
     keys.resourceLock(resource._id),
     async () => {
       const ctx = await eligibilityContext(user, resource, slot, { now });
       const evaluation = evaluate(user, resource, slot, ctx);
-      const { status, error } = requestStatus(evaluation, {
-        joinWaitlist: input.joinWaitlist,
-      });
+      const { status, error } = requestStatus(evaluation, { joinWaitlist });
       const position = ctx.waitlistAhead + 1;
       if (error === "INELIGIBLE") throw ineligible(evaluation);
       if (error === "SLOT_TAKEN") {
@@ -192,7 +229,7 @@ export async function createBooking(
         orgUnit: resource.orgUnit._id,
         borrower: user._id,
         ...slot,
-        purpose: input.purpose,
+        purpose,
         status,
         eligibilitySnapshot: snapshot(evaluation),
         ...(status === "approved" && {
@@ -735,15 +772,17 @@ export async function listForManager(managerId, query = {}) {
     query.populate("resource", "title slug quantity").populate(BORROWER).lean();
 
   if (status === "pending") {
-    const competing = await withPeople(
+    // One past the cap, so "exactly 500" and "more than 500" can be told apart.
+    const read = await withPeople(
       Booking.find({ ...filter, status: { $in: ["pending", "waitlisted"] } })
-        .sort({ createdAt: 1 })
-        .limit(QUEUE_CAP),
+        .sort({ createdAt: 1, _id: 1 })
+        .limit(QUEUE_CAP + 1),
     );
-    const groups = groupConflicts(competing);
+    const capped = read.length > QUEUE_CAP;
+    const groups = groupConflicts(capped ? read.slice(0, QUEUE_CAP) : read);
     return {
       groups: groups.slice((page - 1) * limit, page * limit),
-      meta: { page, limit, total: groups.length },
+      meta: { page, limit, total: groups.length, capped },
     };
   }
 
