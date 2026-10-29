@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE-WITH-YOUR-RENDER-SERVICE.invalid/api/:path*"
+      "destination": "https://campuscommons-api.onrender.com/api/:path*"
     },
     {
       "source": "/((?!api/|assets/).*)",
