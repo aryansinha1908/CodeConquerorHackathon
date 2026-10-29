@@ -36,10 +36,7 @@ export const AuditPage = lazy(() => import('../features/admin/AuditPage'));
 export const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
 export const HowItWorksPage = lazy(() => import('../pages/HowItWorksPage'));
 export const ProfilePage = lazy(() => import('../features/profile/ProfilePage'));
-// /badges is the teammate's: their page replaces this line's import when it lands.
-export const BadgesPage = lazy(() =>
-  import('../pages/Placeholders').then((module) => ({ default: module.BadgesPlaceholder }))
-);
+export const BadgesPage = lazy(() => import('../features/badges/BadgesPage'));
 
 // Not a page: the header bell. Its menu is Headless UI's, which nothing else on the first screen
 // needs, so the login page never downloads it and a signed-in page fetches it alongside its own
