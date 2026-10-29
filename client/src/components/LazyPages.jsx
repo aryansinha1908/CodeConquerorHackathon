@@ -13,6 +13,7 @@ import { withStaleChunkReload } from '../lib/staleChunk';
 // (lib/staleChunk.js). Not in dev, where a failed import is a code error to see as it is.
 const lazy = (load) => reactLazy(import.meta.env.PROD ? withStaleChunkReload(load) : load);
 
+export const HomePage = lazy(() => import('../pages/HomePage'));
 export const ExplorePage = lazy(() => import('../pages/ExplorePage'));
 export const ResourceDetailPage = lazy(() => import('../pages/ResourceDetailPage'));
 export const VerificationPage = lazy(() => import('../features/verification/VerificationPage'));

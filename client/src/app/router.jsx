@@ -24,6 +24,7 @@ import {
   ExplorePage,
   HandoverPage,
   HandoversPage,
+  HomePage,
   IncidentDetailPage,
   IncidentListPage,
   LazyPage,
@@ -85,6 +86,7 @@ export const router = createBrowserRouter([
       </ErrorBoundary>
     ),
     children: [
+      { path: '/', element: page(<HomePage />) },
       { path: '/explore', element: page(<ExplorePage />) },
       { path: '/resources/:id', element: page(<ResourceDetailPage />) },
       { path: '/verification', element: page(<VerificationPage />) },
@@ -159,6 +161,5 @@ export const router = createBrowserRouter([
   },
 
   // ── Fallback redirects ──────────────────────────────────────────────────────
-  { path: '/', element: <Navigate to="/explore" replace /> },
-  { path: '*', element: <Navigate to="/explore" replace /> },
+  { path: '*', element: <Navigate to="/" replace /> },
 ]);
