@@ -281,7 +281,12 @@ The seed writes the 18 NIT JSR org units, the badge catalogue, 13 sample resourc
 
   Expect `Seeding the "campuscommons" database.` first and `Done. Demo logins: …` last. Point it at the **Upstash** Redis, not a local one: the seed clears the deployed API's caches there, and the demo bookings need the Redis lock. Without Redis it prints `Demo bookings skipped`.
 
-  On a network that blocks port 6379 (campus Wi-Fi often does: [§0](#0-before-you-start)), the laptop can't reach Upstash. Run the seed from a phone hotspot instead.
+  On a network that blocks port 6379 (campus Wi-Fi often does: [§0](#0-before-you-start)), the laptop can't reach Upstash. Upstash's port 443 serves only its REST API, not the Redis protocol, so there is no way around it there. Either:
+  - **run the seed from a phone hotspot**, as above; or
+  - **seed with your local Redis** (`REDIS_URL=redis://127.0.0.1:6379` in `.env.production.local`, with the Atlas `MONGODB_URI`).
+    - Any Redis takes the booking lock, so the demo bookings are created.
+    - Only clearing the deployed API's caches is skipped: they expire on their own within 10 minutes, and a new deployment has none.
+    - Seed while nobody is using the site: the deployed API's bookings take their lock in Upstash, not in your local Redis.
 
 - [ ] Run it while the API is idle. A sweep that runs mid-seed can move a demo booking on, which is then skipped with a warning; run the seed again.
 - [ ] **Seed shortly before judging.** The demo bookings are placed relative to the moment of the seed ("tomorrow 10:00", "in use now"), and the sweeper moves them on as time passes.
