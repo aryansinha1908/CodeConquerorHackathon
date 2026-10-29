@@ -39,6 +39,36 @@ export function DemoRoleSwitcher({ roles, onLogin }) {
 
   if (!roles?.length) return null;
 
+  // Split into row 1 (student, student 2, faculty) and row 2 (manager, admin centered)
+  const row1Roles = roles.filter((r) => ['student', 'student2', 'faculty'].includes(r));
+  const row2Roles = roles.filter((r) => ['manager', 'admin'].includes(r));
+  const otherRoles = roles.filter((r) => !['student', 'student2', 'faculty', 'manager', 'admin'].includes(r));
+  const finalRow1 = [...row1Roles, ...otherRoles];
+
+  const renderRoleButton = (role) => {
+    const meta = ROLE_LABELS[role] ?? { label: role, emoji: '👤' };
+    return (
+      <motion.button
+        key={role}
+        variants={fadeUp}
+        {...press}
+        onClick={() => handleDemoLogin(role)}
+        disabled={loading !== null}
+        className={[
+          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-[#1a1a1a]',
+          'text-xs font-bold font-mono text-white',
+          'shadow-[2px_2px_0_#1a1a1a] active:shadow-none active:translate-x-[2px] active:translate-y-[2px]',
+          'transition-[box-shadow,translate,background-color,opacity] disabled:opacity-50 disabled:cursor-not-allowed',
+          meta.color ?? 'bg-[#183d2d]',
+        ].join(' ')}
+        aria-label={`Try as ${meta.label}`}
+      >
+        <span aria-hidden="true">{meta.emoji}</span>
+        {loading === role ? 'Loading…' : meta.label}
+      </motion.button>
+    );
+  };
+
   return (
     <div className="mb-6 p-4 rounded-xl border-2 border-[#1a1a1a] bg-[#183d2d]/5 shadow-[3px_3px_0_#1a1a1a]">
       <div className="flex items-center gap-2 mb-3">
@@ -48,32 +78,19 @@ export function DemoRoleSwitcher({ roles, onLogin }) {
         </p>
       </div>
       {/* The role buttons come in one after another once demo-config answers. */}
-      <motion.div variants={stagger(0.05, 0.1)} {...enter} className="flex flex-wrap gap-2">
-        {roles.map((role) => {
-          const meta = ROLE_LABELS[role] ?? { label: role, emoji: '👤' };
-          return (
-            <motion.button
-              key={role}
-              variants={fadeUp}
-              {...press}
-              onClick={() => handleDemoLogin(role)}
-              disabled={loading !== null}
-              className={[
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-[#1a1a1a]',
-                'text-xs font-bold font-mono text-white',
-                'shadow-[2px_2px_0_#1a1a1a] active:shadow-none active:translate-x-[2px] active:translate-y-[2px]',
-                'transition-[box-shadow,translate,background-color,opacity] disabled:opacity-50 disabled:cursor-not-allowed',
-                meta.color ?? 'bg-[#183d2d]',
-              ].join(' ')}
-              aria-label={`Try as ${meta.label}`}
-            >
-              <span aria-hidden="true">{meta.emoji}</span>
-              {loading === role ? 'Loading…' : meta.label}
-            </motion.button>
-          );
-        })}
+      <motion.div variants={stagger(0.05, 0.1)} {...enter} className="flex flex-col gap-2">
+        {/* Row 1: Student, Student 2, Faculty keep their exact positions */}
+        <div className="flex flex-wrap gap-2">
+          {finalRow1.map(renderRoleButton)}
+        </div>
+
+        {/* Row 2: Manager and Admin centered in the same line */}
+        {row2Roles.length > 0 && (
+          <div className="flex flex-wrap justify-center items-center gap-2">
+            {row2Roles.map(renderRoleButton)}
+          </div>
+        )}
       </motion.div>
     </div>
   );
 }
-

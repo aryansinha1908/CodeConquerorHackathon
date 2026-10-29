@@ -53,7 +53,16 @@ html {
 
 body {
   margin: 0;
-  background-color: var(--color-hf-cream);
+  /* Agar image folder mein hai toh path sahi se dein (jaise /images/bg.png ya URL) */
+  background-image: url('/background.jpeg'); 
+  background-size: auto;
+  background-position: top left;
+  background-repeat: repeat;
+  background-attachment: fixed;
+  
+  /* Fallback color agar image load na ho */
+  background-color: var(--color-hf-cream); 
+  
   color: var(--color-hf-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

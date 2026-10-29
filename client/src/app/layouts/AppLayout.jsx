@@ -8,6 +8,7 @@ import {
   Bell,
   CalendarCheck,
   Compass,
+  Home,
   IdCard,
   Layers,
   LogOut,
@@ -72,6 +73,7 @@ export function UserMenuFallback() {
 // The main sections. Profile, ID verification and the Admin console live in the account menu (the
 // name at the right of the header) and on /profile.
 const SECTIONS = [
+  { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/explore', label: 'Explore', icon: Compass },
   { to: '/bookings', label: 'Bookings', icon: CalendarCheck },
   { to: '/badges', label: 'Badges', icon: Award },
@@ -82,9 +84,10 @@ const SECTIONS = [
  * One section link. `boxed`: the active link draws its own green box (the mobile menu); otherwise
  * DesktopNav's sliding indicator draws it behind the link.
  */
-function SectionLink({ to, icon: Icon, label, onClick, boxed = false }) {
+function SectionLink({ to, icon: Icon, label, onClick, boxed = false, end = false }) {
   return (
     <NavLink
+      end={end || to === '/'}
       to={to}
       onClick={onClick}
       className={({ isActive }) =>
@@ -105,7 +108,7 @@ function SectionLink({ to, icon: Icon, label, onClick, boxed = false }) {
   );
 }
 
-const isUnder = (pathname, to) => pathname === to || pathname.startsWith(`${to}/`);
+const isUnder = (pathname, to) => (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`));
 
 /**
  * The desktop section links, with a green box that slides to the active one. The box is placed from
@@ -171,7 +174,7 @@ export function AppLayout() {
   const sections = SECTIONS.filter((section) => !section.staff || view.isManager);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f5f0e8] text-[#1a1a1a] font-mono selection:bg-[#c0392b] selection:text-white">
+    <div className="min-h-screen flex flex-col bg-[#f5f0e8]/85 text-[#1a1a1a] font-mono selection:bg-[#c0392b] selection:text-white">
       {/* Skip to main content link for a11y */}
       <a href="#main-content" className="skip-link">
         Skip to main content
@@ -181,7 +184,7 @@ export function AppLayout() {
       <header className="sticky top-0 z-40 bg-[#f5f0e8] border-b-2 border-[#1a1a1a] shadow-[0_2px_0_rgba(26,26,26,0.08)]">
         <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
           {/* Brand */}
-          <Link to="/explore" className="flex items-center gap-2.5 group shrink-0">
+          <Link to="/" className="flex items-center gap-2.5 group shrink-0">
             <div className="w-9 h-9 bg-[#c0392b] border-2 border-[#1a1a1a] rounded-lg shadow-[2px_2px_0_#1a1a1a] flex items-center justify-center font-black text-white text-base transition-transform group-hover:-translate-y-0.5">
               CC
             </div>
