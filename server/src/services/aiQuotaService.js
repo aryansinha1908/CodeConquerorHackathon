@@ -14,14 +14,17 @@ import { TTL, keys } from "../lib/redisKeys.js";
 import { DAY, MINUTE, formatHHmm, istParts } from "../lib/time.js";
 import { canonicalJSON, getOrSet } from "./cacheService.js";
 
-// KEYS: burst, userDay, globalMinute, globalDay
-// ARGV: burstSeconds, userLimit, rpmLimit, globalLimit, dayTtlSeconds, minuteTtlSeconds
-// → {1, "OK", usedToday} or {0, reason, value}; value is the burst wait in ms for BURST.
+// KEYS: burst, userDay, globalMinute, globalDay, poolDay
+// ARGV: burstSeconds, userLimit, rpmLimit, globalLimit, dayTtlSeconds, minuteTtlSeconds, poolLimit
+// poolLimit is -1 for an account outside any pool; poolDay is then a key nothing reads.
+// → {1, "OK", usedToday, poolUsedToday} or {0, reason, value}; value is the burst wait in ms for BURST.
 const RESERVE = `
 local burstTtl = redis.call("PTTL", KEYS[1])
 if burstTtl ~= -2 then return {0, "BURST", burstTtl} end
 local used = tonumber(redis.call("GET", KEYS[2]) or "0")
 if used >= tonumber(ARGV[2]) then return {0, "USER_DAILY", used} end
+local poolLimit = tonumber(ARGV[7])
+if poolLimit >= 0 and tonumber(redis.call("GET", KEYS[5]) or "0") >= poolLimit then return {0, "POOL_DAILY", 0} end
 if tonumber(redis.call("GET", KEYS[3]) or "0") >= tonumber(ARGV[3]) then return {0, "GLOBAL_MINUTE", 0} end
 if tonumber(redis.call("GET", KEYS[4]) or "0") >= tonumber(ARGV[4]) then return {0, "GLOBAL_DAILY", 0} end
 if tonumber(ARGV[1]) > 0 then redis.call("SET", KEYS[1], 1, "EX", ARGV[1]) end
@@ -31,23 +34,34 @@ redis.call("INCR", KEYS[3])
 redis.call("EXPIRE", KEYS[3], ARGV[6])
 redis.call("INCR", KEYS[4])
 redis.call("EXPIRE", KEYS[4], ARGV[5])
-return {1, "OK", used}`;
+local poolUsed = 0
+if poolLimit >= 0 then
+  poolUsed = redis.call("INCR", KEYS[5])
+  redis.call("EXPIRE", KEYS[5], ARGV[5])
+end
+return {1, "OK", used, poolUsed}`;
 
-// Gives the user's daily request back. Global counters stay spent: the call may still have
-// reached Google. The burst flag stays too, so a failing endpoint can't be hammered.
+// Gives the user's daily request back, and the pool's when there is one (ARGV[1] = "1"). Global
+// counters stay spent: the call may still have reached Google. The burst flag stays too, so a
+// failing endpoint can't be hammered.
 const REFUND = `
 local used = tonumber(redis.call("GET", KEYS[1]) or "0")
-if used > 0 then return redis.call("DECR", KEYS[1]) end
-return 0`;
+if used > 0 then used = redis.call("DECR", KEYS[1]) end
+if ARGV[1] == "1" and tonumber(redis.call("GET", KEYS[2]) or "0") > 0 then redis.call("DECR", KEYS[2]) end
+return used`;
 
 function client() {
   const redis = getRedis();
   if (!redis.aiReserve) {
-    redis.defineCommand("aiReserve", { numberOfKeys: 4, lua: RESERVE });
-    redis.defineCommand("aiRefund", { numberOfKeys: 1, lua: REFUND });
+    redis.defineCommand("aiReserve", { numberOfKeys: 5, lua: RESERVE });
+    redis.defineCommand("aiRefund", { numberOfKeys: 2, lua: REFUND });
   }
   return redis;
 }
+
+// The pool key, or one that is never read when the account isn't in a pool (the scripts take a
+// fixed number of keys).
+const poolKey = (pool, day) => keys.aiPoolDay(pool ?? "none", day);
 
 function envInt(name, fallback) {
   const value = Number.parseInt(process.env[name] ?? "", 10);
@@ -60,8 +74,14 @@ export function aiLimits() {
     userDaily: envInt("AI_USER_DAILY_LIMIT", 5),
     globalPerMinute: envInt("AI_GLOBAL_RPM", 8),
     globalDaily: envInt("AI_GLOBAL_DAILY_LIMIT", 50),
+    // All demo accounts together (aiService.js puts them in the "demo" pool): below the global cap, so
+    // a demo visitor who dodges the per-visitor counter (a forged X-Forwarded-For on a direct call)
+    // can spend at most this, never what real members need.
+    demoDaily: envInt("AI_DEMO_DAILY_LIMIT", 30),
   };
 }
+
+const poolLimitOf = (pool, limits) => (pool === "demo" ? limits.demoDaily : -1);
 
 // Counters roll over at IST midnight and on each minute.
 function istWindows(now) {
@@ -81,6 +101,8 @@ const MESSAGES = {
   BURST: (limit) => `Please wait ${limit} seconds between AI requests.`,
   USER_DAILY: (limit) =>
     `You've used all ${limit} of today's AI requests. Regular search still works, and AI resets at midnight.`,
+  POOL_DAILY: () =>
+    "The demo accounts have used today's AI requests. Regular search still works, and AI resets at midnight.",
   GLOBAL_MINUTE: () =>
     "AI is busy right now. Try again in a minute; regular search still works.",
   GLOBAL_DAILY: () =>
@@ -127,16 +149,20 @@ function denial(reason, value, limits, windows, now) {
   }
   if (reason === "USER_DAILY")
     return { limit: limits.userDaily, resetsAt: windows.nextMidnight };
+  if (reason === "POOL_DAILY")
+    return { limit: limits.demoDaily, resetsAt: windows.nextMidnight };
   if (reason === "GLOBAL_MINUTE")
     return { limit: limits.globalPerMinute, resetsAt: windows.nextMinute };
   return { limit: limits.globalDaily, resetsAt: windows.nextMidnight };
 }
 
+// userId: the quota subject (aiService.js aiQuotaFor). pool: "demo" for the demo accounts, else null.
 // → { quota: { used, limit, remaining, resetsAt }, refund() }. Throws AiQuotaError or AiUnavailableError.
-export async function reserveAiQuota(userId, now = new Date()) {
+export async function reserveAiQuota(userId, now = new Date(), { pool = null } = {}) {
   const limits = aiLimits();
   const windows = istWindows(now);
   const userDayKey = keys.aiUserDay(userId, windows.day);
+  const poolDayKey = poolKey(pool, windows.day);
   let reply;
   try {
     reply = await client().aiReserve(
@@ -144,12 +170,14 @@ export async function reserveAiQuota(userId, now = new Date()) {
       userDayKey,
       keys.aiGlobalMinute(windows.minute),
       keys.aiGlobalDay(windows.day),
+      poolDayKey,
       limits.burstSeconds,
       limits.userDaily,
       limits.globalPerMinute,
       limits.globalDaily,
       TTL.aiDayCounterSeconds,
       TTL.aiMinuteCounterSeconds,
+      poolLimitOf(pool, limits),
     );
   } catch (err) {
     log.warn({ err }, "AI quota check failed; AI is off until Redis is back");
@@ -165,12 +193,14 @@ export async function reserveAiQuota(userId, now = new Date()) {
   }
 
   const used = Number(value);
+  const userLeft = Math.max(0, limits.userDaily - used);
+  const poolLeft = pool ? Math.max(0, limits.demoDaily - Number(reply[3] ?? 0)) : Infinity;
   let refunded = false;
   return {
     quota: {
       used,
       limit: limits.userDaily,
-      remaining: Math.max(0, limits.userDaily - used),
+      remaining: Math.min(userLeft, poolLeft),
       resetsAt: windows.nextMidnight.toISOString(),
     },
     // Refunds the same day's counter even if the call ran past midnight. Safe to call twice.
@@ -178,29 +208,37 @@ export async function reserveAiQuota(userId, now = new Date()) {
       if (refunded) return;
       refunded = true;
       try {
-        await client().aiRefund(userDayKey);
+        await client().aiRefund(userDayKey, poolDayKey, pool ? "1" : "0");
       } catch (err) {
-        log.warn({ err, userId }, "AI quota refund failed");
+        // The account id only: a demo subject also carries the caller's address.
+        log.warn({ err, userId: String(userId).split("@")[0] }, "AI quota refund failed");
       }
     },
   };
 }
 
-// For GET /ai/quota and the "AI requests left today" meter.
-export async function getAiQuota(userId, now = new Date()) {
+// For GET /ai/quota and the "AI requests left today" meter. In a pool, remaining is also capped by
+// what the pool has left, so the meter never promises a request the pool would refuse.
+export async function getAiQuota(userId, now = new Date(), { pool = null } = {}) {
   const limits = aiLimits();
   const windows = istWindows(now);
   let used;
+  let poolUsed = 0;
   try {
-    used =
-      Number(await getRedis().get(keys.aiUserDay(userId, windows.day))) || 0;
+    [used, poolUsed] = (
+      await Promise.all([
+        getRedis().get(keys.aiUserDay(userId, windows.day)),
+        pool ? getRedis().get(poolKey(pool, windows.day)) : 0,
+      ])
+    ).map((value) => Number(value) || 0);
   } catch (err) {
     throw new AiUnavailableError(undefined, { cause: err });
   }
+  const userLeft = Math.max(0, limits.userDaily - used);
   return {
     used,
     limit: limits.userDaily,
-    remaining: Math.max(0, limits.userDaily - used),
+    remaining: pool ? Math.min(userLeft, Math.max(0, limits.demoDaily - poolUsed)) : userLeft,
     resetsAt: windows.nextMidnight.toISOString(),
   };
 }
@@ -240,6 +278,7 @@ const aiCacheKey = (feature, input) =>
 // → { result, cached, quota }
 export async function withAiQuota({
   userId,
+  pool = null,
   feature,
   input,
   call,
@@ -256,7 +295,7 @@ export async function withAiQuota({
     aiCacheKey(feature, input),
     TTL.aiCacheSeconds,
     async () => {
-      reservation = await reserveAiQuota(userId, now);
+      reservation = await reserveAiQuota(userId, now, { pool });
       try {
         return await call();
       } catch (err) {
@@ -278,6 +317,6 @@ export async function withAiQuota({
   return {
     result,
     cached: reservation === null,
-    quota: reservation ? reservation.quota : await getAiQuota(userId, now),
+    quota: reservation ? reservation.quota : await getAiQuota(userId, now, { pool }),
   };
 }

@@ -39,9 +39,10 @@ const unreachable = () => {
   };
 };
 
-const setLimits = ({ burst = 0, user = 5, rpm = 100, global = 1000 } = {}) => {
+const setLimits = ({ burst = 0, user = 5, demo = 30, rpm = 100, global = 1000 } = {}) => {
   process.env.AI_USER_BURST_SECONDS = String(burst);
   process.env.AI_USER_DAILY_LIMIT = String(user);
+  process.env.AI_DEMO_DAILY_LIMIT = String(demo);
   process.env.AI_GLOBAL_RPM = String(rpm);
   process.env.AI_GLOBAL_DAILY_LIMIT = String(global);
 };
@@ -203,6 +204,37 @@ describe("getAiQuota", () => {
       resetsAt: ist("2026-11-04T00:00").toISOString(),
     });
     assert.equal((await getAiQuota("u2", NOW)).remaining, 5);
+  });
+});
+
+describe("the demo pool", () => {
+  test("demo visitors each have their own counter, but all of them together stop at the pool's limit", async () => {
+    setLimits({ user: 5, demo: 3 });
+    // Three visitors (or one forging a new X-Forwarded-For each time) on the demo accounts.
+    const first = await reserveAiQuota("demo@203.0.113.1", NOW, { pool: "demo" });
+    assert.equal(first.quota.remaining, 2, "the pool has 2 left, fewer than the visitor's own 4");
+    await reserveAiQuota("demo@203.0.113.2", NOW, { pool: "demo" });
+    await reserveAiQuota("other-demo@203.0.113.3", NOW, { pool: "demo" });
+    const err = await denied(reserveAiQuota("demo@203.0.113.4", NOW, { pool: "demo" }));
+    assert.equal(err.details.reason, "POOL_DAILY");
+    assert.equal(err.details.limit, 3);
+    assert.match(err.message, /demo accounts have used today's AI requests/);
+    assert.equal(await redis.get(keys.aiPoolDay("demo", "20261103")), "3");
+    // A real member isn't in the pool: their requests still go through.
+    const real = await reserveAiQuota("member-1", NOW);
+    assert.equal(real.quota.remaining, 4);
+  });
+
+  test("the meter caps remaining by what the pool has left, and a refund gives the pool its request back", async () => {
+    setLimits({ user: 5, demo: 2 });
+    const reservation = await reserveAiQuota("demo@203.0.113.1", NOW, { pool: "demo" });
+    await reserveAiQuota("demo@203.0.113.2", NOW, { pool: "demo" });
+    assert.equal((await getAiQuota("demo@203.0.113.9", NOW, { pool: "demo" })).remaining, 0);
+    await reservation.refund();
+    assert.equal(await redis.get(keys.aiPoolDay("demo", "20261103")), "1");
+    assert.equal((await getAiQuota("demo@203.0.113.9", NOW, { pool: "demo" })).remaining, 1);
+    // Outside the pool the meter is the member's own count only.
+    assert.equal((await getAiQuota("member-1", NOW)).remaining, 5);
   });
 });
 

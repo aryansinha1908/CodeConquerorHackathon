@@ -24,6 +24,8 @@ export const keys = {
   aiBurst: (userId) => `ai:{q}:burst:${userId}`,
   aiUserDay: (userId, day) => `ai:{q}:user:${userId}:${day}`,
   aiGlobalDay: (day) => `ai:{q}:global:${day}`,
+  // Shared by every account in a pool (the demo accounts): their AI requests together, per IST day.
+  aiPoolDay: (pool, day) => `ai:{q}:pool:${pool}:${day}`,
   aiGlobalMinute: (minute) => `ai:{q}:rpm:${minute}`,
   aiCache: (feature, inputHash) => `ai:cache:${feature}:${inputHash}`,
   aiCircuit: "ai:circuit",

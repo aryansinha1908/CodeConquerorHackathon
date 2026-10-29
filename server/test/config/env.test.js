@@ -124,6 +124,15 @@ describe("checkEnv", () => {
     );
   });
 
+  test("no GEMINI_API_KEY warns that the AI features answer 503, in production too", () => {
+    const env = { ...complete(), GEMINI_API_KEY: "" };
+    const { errors, warnings } = checkEnv(env);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, [
+      "GEMINI_API_KEY is not set: AI search and the AI photo comparison answer 503, and regular search carries on.",
+    ]);
+  });
+
   test("an SMTP setup missing its password or sender warns", () => {
     const env = { ...complete(), SMTP_PASS: "", MAIL_FROM: "" };
     const { errors, warnings } = checkEnv(env);

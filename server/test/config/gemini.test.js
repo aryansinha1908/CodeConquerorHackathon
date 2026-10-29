@@ -56,6 +56,28 @@ describe("generateJson", () => {
     assert.deepEqual(body.generationConfig.responseSchema, SCHEMA);
     assert.equal(body.generationConfig.responseMimeType, "application/json");
     assert.deepEqual(body.systemInstruction, { parts: [{ text: "Be brief." }] });
+    assert.ok(init.signal instanceof AbortSignal, "every call has a timeout");
+    // A Flash model is told not to spend its time thinking.
+    assert.deepEqual(body.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+  });
+
+  test("no system text means no systemInstruction; a non-Flash model keeps its default thinking", async () => {
+    process.env.GEMINI_MODEL = "gemini-2.5-pro";
+    answer(200, ok({ ok: true }));
+    await generateJson({ parts: [{ text: "x" }], schema: SCHEMA });
+    assert.equal("systemInstruction" in calls[0].body, false);
+    assert.equal("thinkingConfig" in calls[0].body.generationConfig, false);
+  });
+
+  test("the key and model are trimmed, and a leading models/ is dropped", async () => {
+    process.env.GEMINI_API_KEY = "  test-gemini-key  ";
+    process.env.GEMINI_MODEL = " models/gemini-test-model ";
+    answer(200, ok({ ok: true }));
+    await generateJson({ parts: [{ text: "x" }], schema: SCHEMA });
+    assert.match(calls[0].url, /\/models\/gemini-test-model:generateContent$/);
+    assert.equal(calls[0].init.headers["x-goog-api-key"], "test-gemini-key");
+    process.env.GEMINI_API_KEY = "   ";
+    assert.equal(aiConfigured(), false, "a key of spaces isn't a key");
   });
 
   test("GEMINI_MODEL picks the model", async () => {

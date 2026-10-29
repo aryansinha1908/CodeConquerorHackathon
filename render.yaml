@@ -130,12 +130,15 @@ services:
       - key: GEMINI_MODEL
         sync: false
 
-      # AI quota: per user per day (per demo account and network for the demo accounts) and global
-      # caps; keep the global ones below what AI Studio shows for the key.
+      # AI quota: per user per day (for the demo accounts, per account and visitor), all demo accounts
+      # together per day, and global caps. Keep the demo pool below the global daily cap, and the
+      # global ones below what AI Studio shows for the key.
       - key: AI_USER_BURST_SECONDS
         value: "10"
       - key: AI_USER_DAILY_LIMIT
         value: "5"
+      - key: AI_DEMO_DAILY_LIMIT
+        value: "30"
       - key: AI_GLOBAL_RPM
         value: "8"
       - key: AI_GLOBAL_DAILY_LIMIT

@@ -302,6 +302,14 @@ export const otpSendLimiter = [
 // For takeOtpSend, which runs in the service, after the limiters.
 export const ipKey = (req) => (noAddress(req) ? null : byIp(req));
 
+// The visitor's own address only (the first the trusted proxies forwarded), without the hops after
+// it: through Vercel the next hop is whichever Vercel address carried the request, which changes, so
+// a counter keyed on the whole chain would split one visitor's count. A direct caller can write this
+// first address themselves (see render.yaml TRUST_PROXY_HOPS), so anything keyed on it needs a
+// ceiling of its own: the AI demo pool is that ceiling.
+export const visitorKey = (req) =>
+  noAddress(req) ? null : ipKeyGenerator((req.ips.length ? req.ips : [req.ip])[0]);
+
 // A code emailed by another route (an unverified login sends one) counts against resend-otp's
 // counters, in the same order as otpSendLimiter, so no path emails an address, or a network, more
 // often than resend-otp may. The login tier can't cap it: that 403 isn't a failed attempt

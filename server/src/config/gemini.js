@@ -10,7 +10,8 @@ import { AiUnavailableError } from "../services/aiQuotaService.js";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_TIMEOUT_MS = 25_000;
+// architecture.md §15.1 asks for 8 s; image comparisons pass their own, longer timeout.
+const DEFAULT_TIMEOUT_MS = 12_000;
 
 let override = null;
 
@@ -18,9 +19,13 @@ export function useAiClient(next) {
   override = next;
 }
 
-export const aiConfigured = () => Boolean(override || process.env.GEMINI_API_KEY);
+const apiKey = () => (process.env.GEMINI_API_KEY ?? "").trim();
 
-export const geminiModel = () => process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+export const aiConfigured = () => Boolean(override || apiKey());
+
+// "models/gemini-2.5-flash" (as AI Studio sometimes shows it) and "gemini-2.5-flash" both work.
+export const geminiModel = () =>
+  (process.env.GEMINI_MODEL ?? "").trim().replace(/^models\//, "") || DEFAULT_GEMINI_MODEL;
 
 // Throws before any quota is spent when there is nothing to call.
 export function requireAiConfigured() {
@@ -35,10 +40,12 @@ function toPart(part) {
   return { text: String(part.text ?? "") };
 }
 
-// A Gemini 429 keeps its status, so withAiQuota() refunds the user and opens the circuit. Anything else
-// (timeouts, 5xx, a refusal, JSON that doesn't parse) is a 503 the member can act on.
+// A Gemini 429 keeps its status, so withAiQuota() refunds the user and opens the circuit; always call
+// this through withAiQuota(), which turns that 429 into a 503 too. Anything else (timeouts, 5xx, a
+// refusal, JSON that doesn't parse) is a 503 the member can act on. Only the HTTP status and Google's
+// error status are logged: an error body can quote the prompt, which may hold a member's question.
 function unavailable(reason, err) {
-  log.warn({ err, reason }, "Gemini call failed");
+  log.warn({ reason, status: err?.status, googleStatus: err?.googleStatus }, "Gemini call failed");
   return new AiUnavailableError("AI couldn't answer just now. Regular search still works.", { cause: err });
 }
 
@@ -50,17 +57,25 @@ export async function generateJson({ system, parts, schema, temperature = 0.2, t
   if (override) return override.generateJson({ system, parts, schema, temperature });
   requireAiConfigured();
 
+  const model = geminiModel();
   const body = {
     contents: [{ role: "user", parts: parts.map(toPart) }],
-    generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature },
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: schema,
+      temperature,
+      // Flash models think before answering unless told not to; these tasks don't need it, and the
+      // thinking would eat the timeout. Other models keep their default.
+      ...(/flash/.test(model) && { thinkingConfig: { thinkingBudget: 0 } }),
+    },
     ...(system && { systemInstruction: { parts: [{ text: system }] } }),
   };
 
   let res;
   try {
-    res = await fetch(`${ENDPOINT}/${encodeURIComponent(geminiModel())}:generateContent`, {
+    res = await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      headers: { "content-type": "application/json", "x-goog-api-key": apiKey() },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -69,9 +84,12 @@ export async function generateJson({ system, parts, schema, temperature = 0.2, t
   }
 
   if (!res.ok) {
-    // The body explains a 400 (bad model name, bad schema); it never carries the key.
-    const detail = (await res.text().catch(() => "")).slice(0, 500);
-    const err = Object.assign(new Error(`Gemini answered HTTP ${res.status}`), { status: res.status, detail });
+    // Google's error status ("INVALID_ARGUMENT", "NOT_FOUND" for a wrong model name) says what to fix.
+    const googleStatus = await res
+      .json()
+      .then((b) => b?.error?.status ?? null)
+      .catch(() => null);
+    const err = Object.assign(new Error(`Gemini answered HTTP ${res.status}`), { status: res.status, googleStatus });
     if (res.status === 429) throw err;
     throw unavailable(`http_${res.status}`, err);
   }

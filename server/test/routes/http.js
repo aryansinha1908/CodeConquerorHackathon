@@ -27,9 +27,10 @@ export function useApi() {
   });
 
   // user: a fixture user document (signed in with a real access token); token: a raw token instead;
-  // json: a JSON body; form: a FormData body (multipart). Without user or token, no Authorization.
-  async function call(method, path, { user, token, json, form } = {}) {
-    const headers = {};
+  // json: a JSON body; form: a FormData body (multipart); headers: extra request headers (for example
+  // X-Forwarded-For). Without user or token, no Authorization.
+  async function call(method, path, { user, token, json, form, headers: extra = {} } = {}) {
+    const headers = { ...extra };
     if (user) headers.authorization = `Bearer ${signAccessToken(user)}`;
     if (token) headers.authorization = `Bearer ${token}`;
     if (json !== undefined) headers["content-type"] = "application/json";
