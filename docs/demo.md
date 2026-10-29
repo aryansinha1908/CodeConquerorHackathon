@@ -206,7 +206,7 @@ The **Admin console** opens from the account menu: your name at the right of the
 
 | Try | How | Expect |
 |---|---|---|
-| **Verification queue** | **Admin → Verifications** | Rohan Mehta, pending, with the email hints. **View ID** opens the card through a 5-minute signed link, "Viewing is logged" (needs Cloudinary). **Approve** (confirm member type and department) or **Reject** with a reason, which the member sees on `/verification` |
+| **Verification queue** | **Admin → Verifications** | The demo admin sees only demo accounts (Rohan Mehta); a real member's request needs a real admin (`npm run grant-admin -- <email>`, README "Scripts"). Rohan Mehta, pending, with the email hints. **View ID** opens the card through a 5-minute signed link, "Viewing is logged" (needs Cloudinary). **Approve** (confirm member type and department) or **Reject** with a reason, which the member sees on `/verification` |
 | **Audit log** | **Admin → Audit** | Every change: actor, time, action, reason, before → after. Filter by entity type, entity id, action, unit, actor and IST dates. Rows deep-link to their booking, incident or resource. Managers can read their own units' entries; members can't (they have their booking timelines) |
 | **All incidents** | **Admin → Incidents** | Every unit's incidents, high severity included |
 

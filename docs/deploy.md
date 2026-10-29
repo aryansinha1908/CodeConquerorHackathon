@@ -383,6 +383,14 @@ While it's on, the login page shows the role buttons, and anyone can sign in as 
 - [ ] Don't share the judged URL with students or invite real users onto it. Registration stays open to `@nitjsr.ac.in` (there's no switch to close it), so a teammate can show the OTP flow with their own address, knowing the demo admin can see that account's activity.
 - [ ] A deployment for real members is a **separate** stack: its own Render service (copy the Blueprint under another name), its own Atlas database, its own Upstash database, new secrets, and `DEMO_MODE=false`. With it off, the demo buttons disappear, `POST /auth/demo-login` answers 404, and the demo accounts can't sign in at all.
 - At start-up the API warns in the log when `DEMO_MODE` is on and accounts outside the demo domain exist: the sign that real people are on a demo instance.
+- **Reviewing a real member needs a real admin.** The demo admin's verification queue shows only demo accounts, so a teammate's ID card never appears there. Make your own (email-verified) account an admin, then reload the site:
+
+  ```
+  cd server
+  npm run grant-admin -- <your email>        # --revoke takes it away again
+  ```
+
+  It changes the database in `MONGODB_URI` (`DOTENV_PATH=.env.production.local` for the deployed one, if your `server/.env` points elsewhere) and is audited as `user.roles_changed`.
 - **Emergency brake:** setting `DEMO_MODE` to `"false"` on the judged instance (in `render.yaml`, then sync) stops every demo sign-in. A demo session already open ends at its next token refresh, within 15 minutes. The golden-path script needs `DEMO_MODE=true`.
 
 ---
