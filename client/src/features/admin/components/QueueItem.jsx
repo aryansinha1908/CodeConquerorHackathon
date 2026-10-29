@@ -6,10 +6,10 @@ import { Card } from '../../../components/ui/Card';
 import {
   departmentFromHints,
   formatEmailHints,
-  formatIstDateTime,
   memberTypeFromHints,
   memberTypeLabel,
 } from '../../verification/api';
+import { formatIstDateTime } from '../../../lib/time';
 
 // Never colour alone (frontend.md §1, principle 2): every status has an icon and a label too. Gold,
 // not amber, for pending: white on amber is under the 4.5:1 contrast of frontend.md §10.3.

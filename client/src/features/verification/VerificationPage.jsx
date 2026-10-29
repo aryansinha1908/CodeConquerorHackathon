@@ -22,8 +22,10 @@ import { Badge } from '../../components/ui/Badge';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Select } from '../../components/ui/Select';
 import { Skeleton } from '../../components/ui/Skeleton';
-// Shared with the admin queue until it moves to components/ui as ErrorState (frontend.md §7).
-import { RequestError } from '../admin/components/RequestError';
+import { ErrorState } from '../../components/ui/ErrorState';
+import { fieldErrorsFrom } from '../../lib/errors';
+import { formatIstDateTime } from '../../lib/time';
+import { compressionWorkerOptions } from '../uploads/api';
 import {
   MEMBER_TYPES,
   MEMBER_TYPE_OPTIONS,
@@ -32,8 +34,6 @@ import {
   activeUnits,
   checkIdCardFile,
   departmentFromHints,
-  fieldErrorsFrom,
-  formatIstDateTime,
   getActiveOrgUnits,
   getVerificationStatus,
   groupUnits,
@@ -71,7 +71,8 @@ const headingClass =
 const statusHeadingClass = 'text-xl font-black text-[#1a1a1a] mb-1 focus:outline-none';
 
 // browser-image-compression settings from frontend.md §4: photos ≤ 1 MB / 1600 px before upload.
-const COMPRESSION = { maxSizeMB: 1, maxWidthOrHeight: 1600, useWebWorker: true };
+// The worker loads our own copy of the library, never jsDelivr's (compressionWorkerOptions).
+const COMPRESSION = { maxSizeMB: 1, maxWidthOrHeight: 1600 };
 
 const kb = (bytes) => `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
@@ -280,7 +281,7 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
     const pick = ++pickRef.current;
     setCompressing(picked.type.startsWith('image/'));
     const { file: chosen, error } = await prepareIdCardFile(picked, (image) =>
-      imageCompression(image, COMPRESSION)
+      imageCompression(image, { ...COMPRESSION, ...compressionWorkerOptions() })
     );
     if (pick !== pickRef.current) return;
     setCompressing(false);
@@ -557,7 +558,7 @@ function IdCardForm({ view, user, onSubmitted, onCancel, headingRef }) {
               </div>
             )}
 
-            <RequestError error={submitError} title="Your ID card wasn't submitted" />
+            <ErrorState error={submitError} title="Your ID card wasn't submitted" />
 
             <div className="pt-4 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 border-t border-[#1a1a1a]/15">
               <span className="text-xs text-[#1a1a1a]/70">
@@ -746,7 +747,7 @@ export default function VerificationPage() {
       )}
 
       {statusQuery.isError && !view && (
-        <RequestError
+        <ErrorState
           error={statusQuery.error}
           title="Couldn't load your verification status"
           onRetry={() => statusQuery.refetch()}

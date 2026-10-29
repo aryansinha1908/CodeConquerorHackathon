@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Eye, ExternalLink, FileText } from 'lucide-react';
-import { AdminDialog } from './AdminDialog';
-import { RequestError } from './RequestError';
+import { Dialog } from '../../../components/ui/Dialog';
+import { ErrorState } from '../../../components/ui/ErrorState';
 import { Skeleton } from '../../../components/ui/Skeleton';
-import { formatIstDateTime } from '../../verification/api';
+import { formatIstDateTime } from '../../../lib/time';
 
 // The watermark over the image: the same words as the notice above it, for anyone looking at (or
 // photographing) the screen. Decorative, so hidden from screen readers; the notice says it once.
@@ -66,7 +66,7 @@ export function IdCardDialog({ item, request, onClose, onRetry }) {
   const expires = formatIstDateTime(link?.expiresAt);
 
   return (
-    <AdminDialog
+    <Dialog
       open={Boolean(item)}
       onClose={onClose}
       eyebrow="Identity document"
@@ -86,7 +86,7 @@ export function IdCardDialog({ item, request, onClose, onRetry }) {
       )}
 
       {request.isError && (
-        <RequestError
+        <ErrorState
           error={request.error}
           title={
             request.error?.code === 'NOT_FOUND' ? 'No ID card on file' : "Couldn't open the ID card"
@@ -116,6 +116,6 @@ export function IdCardDialog({ item, request, onClose, onRetry }) {
           </div>
         </div>
       )}
-    </AdminDialog>
+    </Dialog>
   );
 }

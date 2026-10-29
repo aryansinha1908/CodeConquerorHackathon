@@ -52,9 +52,13 @@ export function CardHeader({ children, className, ...props }) {
   );
 }
 
-export function CardTitle({ children, className, ...props }) {
+/**
+ * A card's heading. `as` picks the element ('h2', 'h3', …; default 'h3') so the page outline stays
+ * in order: a card straight under the page's h1 takes as="h2".
+ */
+export function CardTitle({ as: Tag = 'h3', children, className, ...props }) {
   return (
-    <h3
+    <Tag
       className={cn(
         'text-base md:text-lg font-bold font-mono tracking-tight text-[#1a1a1a]',
         className
@@ -62,7 +66,7 @@ export function CardTitle({ children, className, ...props }) {
       {...props}
     >
       {children}
-    </h3>
+    </Tag>
   );
 }
 

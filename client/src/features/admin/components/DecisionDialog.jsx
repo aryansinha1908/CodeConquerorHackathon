@@ -1,20 +1,20 @@
 import React, { useId, useState } from 'react';
 import { CheckCircle2, RotateCcw, XCircle } from 'lucide-react';
-import { AdminDialog } from './AdminDialog';
-import { RequestError } from './RequestError';
+import { Dialog } from '../../../components/ui/Dialog';
+import { ErrorState } from '../../../components/ui/ErrorState';
 import { Button } from '../../../components/ui/Button';
 import { Select } from '../../../components/ui/Select';
 import {
   MEMBER_TYPE_OPTIONS,
   activeUnits as onlyActive,
   departmentFromHints,
-  fieldErrorsFrom,
   formatEmailHints,
   groupUnits,
   memberTypeFromHints,
   memberTypeLabel,
 } from '../../verification/api';
 import { REASON_MAX, REASON_MIN, readDecision } from '../api';
+import { fieldErrorsFrom } from '../../../lib/errors';
 
 // Quick picks for a rejection (frontend.md §7 ReasonDialog); the admin can edit the text after.
 const REJECT_TEMPLATES = [
@@ -261,7 +261,7 @@ export function DecisionForm({
         )}
       </div>
 
-      <RequestError
+      <ErrorState
         error={request.error}
         title={rejecting ? "The rejection wasn't saved" : "The approval wasn't saved"}
       />
@@ -313,7 +313,7 @@ export function DecisionDialog({
 }) {
   const item = target?.item ?? null;
   return (
-    <AdminDialog
+    <Dialog
       open={Boolean(target)}
       onClose={() => {
         if (!request.isPending) onClose();
@@ -336,6 +336,6 @@ export function DecisionDialog({
           onCancel={onClose}
         />
       )}
-    </AdminDialog>
+    </Dialog>
   );
 }

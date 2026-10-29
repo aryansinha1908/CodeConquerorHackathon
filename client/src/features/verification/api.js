@@ -170,41 +170,12 @@ export async function getActiveOrgUnits() {
   return res.data;
 }
 
-// ── Times (frontend.md §1, principle 6: everything on screen is IST) ──────────
+// ── Moved to lib/ ─────────────────────────────────────────────────────────────
 
-const istDateTime = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: true,
-});
-
-/** An ISO instant → "29 Oct 2026, 02:49 am IST", or null. */
-export function formatIstDateTime(value) {
-  if (value == null || value === '') return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${istDateTime.format(date)} IST`;
-}
-
-// ── Errors ────────────────────────────────────────────────────────────────────
-
-/**
- * A VALIDATION_ERROR's details [{ path, message }] → { [path]: message } for the form fields
- * (frontend.md §8.3). The first message for a path wins. Anything else → {}.
- */
-export function fieldErrorsFrom(err) {
-  if (err?.code !== 'VALIDATION_ERROR' || !Array.isArray(err.details)) return {};
-  const fields = {};
-  for (const detail of err.details) {
-    const path = typeof detail?.path === 'string' ? detail.path : null;
-    if (path && !(path in fields)) fields[path] = String(detail.message ?? 'Invalid value.');
-  }
-  return fields;
-}
+// Re-exported for the importers that still read them here (test/verification.test.mjs); new code
+// imports lib/time.js and lib/errors.js directly.
+export { formatIstDateTime } from '../../lib/time';
+export { fieldErrorsFrom } from '../../lib/errors';
 
 // ── Requests ──────────────────────────────────────────────────────────────────
 

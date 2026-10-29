@@ -474,20 +474,27 @@ test('a busy or aria-disabled Button keeps focus and swallows its click', async 
   assert.equal(Button({ disabled: true, loading: true, children: 'Go' }).props.disabled, true);
 });
 
-test('Explore offers units that its mock resources can be filtered by', async () => {
-  // /org-units is real now, but /resources isn't (Phase 4): getResources falls back to the mock
-  // resources, which only the mock units' ids match.
-  fakeApi({ 'GET /org-units': () => ({ status: 200, data: UNITS }) });
-  const { getOrgUnits, getResources } = await load('/src/features/resources/api.js');
-  const { MOCK_RESOURCES } = await load('/src/features/resources/mockData.js');
-  const units = (await getOrgUnits()).data;
-  let shownTotal = 0;
-  for (const unit of units) {
-    const shown = (await getResources({ orgUnit: unit._id })).data.resources;
-    assert.ok(shown.every((r) => r.orgUnit._id === unit._id));
-    shownTotal += shown.length;
+test("Explore's unit filter sends the id of a unit from GET /org-units to GET /resources", async () => {
+  // Both are real now (no mock resources): the units Explore offers are the server's, and picking
+  // one asks GET /resources for that unit's id, through the URL Explore keeps its filters in.
+  const units = [
+    { _id: '64a000000000000000000c5e', code: 'cse', name: 'Computer Science and Engineering', type: 'department', isActive: true },
+    { _id: '64a000000000000000000d1c', code: 'dic', name: 'Design and Innovation Centre', type: 'centre', isActive: true },
+  ];
+  const calls = fakeApi({
+    'GET /org-units': () => ({ status: 200, data: units }),
+    'GET /resources': () => ({ status: 200, data: [], meta: { page: 1, limit: 12, total: 0 } }),
+  });
+  const { getActiveOrgUnits } = await load('/src/features/verification/api.js');
+  const { listResources, readExploreFilters, writeExploreFilters } = await load('/src/features/resources/api.js');
+  const offered = (await getActiveOrgUnits()).data;
+  assert.deepEqual(offered.map((u) => u._id), units.map((u) => u._id));
+  for (const unit of offered) {
+    const url = writeExploreFilters(new URLSearchParams(), { orgUnit: unit._id });
+    await listResources(readExploreFilters(url));
   }
-  assert.equal(shownTotal, MOCK_RESOURCES.length);
+  const sent = calls.filter((c) => c.key === 'GET /resources').map((c) => c.config.params.orgUnit);
+  assert.deepEqual(sent, units.map((u) => u._id));
 });
 
 test('queue status, page and page count are read defensively', async () => {

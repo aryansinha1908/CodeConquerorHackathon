@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { Shield, UserCheck, Users, FileText, AlertCircle } from 'lucide-react';
+import { UserCheck, Users, FileText, AlertCircle } from 'lucide-react';
 
 export function AdminLayout() {
   const subnavClass = ({ isActive }) =>

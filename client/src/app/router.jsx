@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react';
+import React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 
 // Layouts & Guards
@@ -14,26 +14,30 @@ import LoginPage from '../features/auth/LoginPage';
 import RegisterPage from '../features/auth/RegisterPage';
 import VerifyOtpPage from '../features/auth/VerifyOtpPage';
 
-// Lazy loaded pages
-const ExplorePage = lazy(() => import('../pages/ExplorePage'));
-const ResourceDetailPage = lazy(() => import('../pages/ResourceDetailPage'));
-const VerificationPage = lazy(() => import('../features/verification/VerificationPage'));
-const VerificationQueuePage = lazy(() => import('../features/admin/VerificationQueuePage'));
+// Lazy loaded pages (declared in components/LazyPages.jsx, a components-only module)
 import {
-  BookingsPlaceholder,
-  BadgesPlaceholder,
-  ManagePlaceholder,
+  BookingDetailPage,
+  ExplorePage,
+  HandoverPage,
+  HandoversPage,
+  LazyPage,
+  MyBookingsPage,
+  RequestsPage,
+  ResourceDetailPage,
+  ReturnConfirmPage,
+  VerificationPage,
+  VerificationQueuePage,
+} from '../components/LazyPages';
+import {
   AdminPlaceholder,
+  BadgesPlaceholder,
+  IncidentPlaceholder,
+  ManagePlaceholder,
+  PagePlaceholder,
 } from '../pages/Placeholders';
 
-function PageFallback() {
-  return (
-    <div className="min-h-[50vh] flex flex-col items-center justify-center font-mono">
-      <div className="w-8 h-8 border-4 border-[#183d2d] border-t-transparent rounded-full animate-spin mb-3" />
-      <span className="text-xs font-bold text-[#1a1a1a]">LOADING MODULE...</span>
-    </div>
-  );
-}
+// A lazy page inside the shared loading fallback.
+const page = (element) => <LazyPage>{element}</LazyPage>;
 
 export const router = createBrowserRouter([
   // ── Public auth routes ──────────────────────────────────────────────────────
@@ -72,46 +76,31 @@ export const router = createBrowserRouter([
       </ErrorBoundary>
     ),
     children: [
+      { path: '/explore', element: page(<ExplorePage />) },
+      { path: '/resources/:id', element: page(<ResourceDetailPage />) },
+      { path: '/verification', element: page(<VerificationPage />) },
+
+      // ── Bookings (frontend.md §6.2) ───────────────────────────────────────
+      { path: '/bookings', element: page(<MyBookingsPage />) },
+      { path: '/bookings/:id', element: page(<BookingDetailPage />) },
+      // One wizard for both handovers, the phase from the route. Keyed by phase, so going from
+      // check-in to check-out starts a fresh form instead of reusing the previous one's state.
       {
-        path: '/explore',
-        element: (
-          <Suspense fallback={<PageFallback />}>
-            <ExplorePage />
-          </Suspense>
-        ),
+        path: '/bookings/:id/check-in',
+        element: page(<HandoverPage key="check_in" phase="check_in" />),
       },
       {
-        path: '/resources/:id',
-        element: (
-          <Suspense fallback={<PageFallback />}>
-            <ResourceDetailPage />
-          </Suspense>
-        ),
+        path: '/bookings/:id/check-out',
+        element: page(<HandoverPage key="check_out" phase="check_out" />),
       },
-      {
-        path: '/verification',
-        element: (
-          <Suspense fallback={<PageFallback />}>
-            <VerificationPage />
-          </Suspense>
-        ),
-      },
-      {
-        path: '/bookings',
-        element: (
-          <Suspense fallback={<PageFallback />}>
-            <BookingsPlaceholder />
-          </Suspense>
-        ),
-      },
-      {
-        path: '/badges',
-        element: (
-          <Suspense fallback={<PageFallback />}>
-            <BadgesPlaceholder />
-          </Suspense>
-        ),
-      },
+
+      { path: '/badges', element: page(<BadgesPlaceholder />) },
+
+      // ── Incidents (frontend.md §6.2), not built yet ───────────────────────
+      // "Report an issue" and the history's "Open the incident" link here; without these routes
+      // they fell through to the catch-all and landed on Explore without a word.
+      { path: '/incidents/new', element: page(<IncidentPlaceholder kind="report" />) },
+      { path: '/incidents/:id', element: page(<IncidentPlaceholder kind="detail" />) },
 
       // ── Manager sub-routes ────────────────────────────────────────────────
       {
@@ -122,9 +111,36 @@ export const router = createBrowserRouter([
           </RequireRole>
         ),
         children: [
+          // No dashboard yet (frontend.md §6.3): open the review queue.
+          { index: true, element: <Navigate to="requests" replace /> },
+          { path: 'requests', element: page(<RequestsPage />) },
+          { path: 'handovers', element: page(<HandoversPage />) },
+          { path: 'returns/:bookingId', element: page(<ReturnConfirmPage />) },
           {
-            index: true,
-            element: <ManagePlaceholder />,
+            path: 'resources',
+            element: page(
+              <PagePlaceholder
+                level={2}
+                eyebrow="Unit resources"
+                title="Your unit's resources"
+                description="Adding and editing the resources of your units, their rules and closures."
+                backTo="/manage/requests"
+                backLabel="Back to the review queue"
+              />
+            ),
+          },
+          {
+            path: 'incidents/*',
+            element: page(
+              <PagePlaceholder
+                level={2}
+                eyebrow="Incidents"
+                title="Incidents"
+                description="Incidents in your units, with their threads and the resolve dialog."
+                backTo="/manage/handovers"
+                backLabel="Back to handovers"
+              />
+            ),
           },
           {
             path: '*',
@@ -146,14 +162,7 @@ export const router = createBrowserRouter([
             index: true,
             element: <AdminPlaceholder />,
           },
-          {
-            path: 'verifications',
-            element: (
-              <Suspense fallback={<PageFallback />}>
-                <VerificationQueuePage />
-              </Suspense>
-            ),
-          },
+          { path: 'verifications', element: page(<VerificationQueuePage />) },
           {
             path: '*',
             element: <AdminPlaceholder />,

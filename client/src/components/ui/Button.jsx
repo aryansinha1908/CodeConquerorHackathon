@@ -38,8 +38,9 @@ export function Button({
       'bg-transparent text-[#1a1a1a] shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
     ghost:
       'bg-transparent text-[#1a1a1a] border-transparent shadow-none hover:bg-[#1a1a1a]/10',
+    // #a93226, not #e74c3c: white on #e74c3c is 3.8:1, under the 4.5:1 of frontend.md §10.3.
     danger:
-      'bg-[#e74c3c] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
+      'bg-[#a93226] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
     forest:
       'bg-[#183d2d] text-white shadow-[3px_3px_0px_0px_#1a1a1a] hover:shadow-[1px_1px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]',
   };
