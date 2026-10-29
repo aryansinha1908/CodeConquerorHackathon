@@ -33,6 +33,12 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         codeSplitting: { groups: vendorGroups },
+        // Run modules in source order whatever chunk they land in. Without it, Rolldown can put its
+        // CommonJS helpers (__commonJSMin) in an app chunk that imports the vendor chunk, which
+        // imports the helpers back: React then runs before they exist, and the whole app is a blank
+        // page ("t is not a function"). Main's build on 30 Oct did exactly that on Vercel, although
+        // the build itself passed. About 4% more code.
+        strictExecutionOrder: true,
       },
     },
   },
