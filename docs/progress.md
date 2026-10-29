@@ -2,7 +2,13 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`, last pushed commit `1a59fed` (the notification and audit reads). `main` has everything through PR #9 (`623e78f`). Moving the services onto `params.js` (§2, last row) is in the working tree, **not yet committed**.
+**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11) are committed locally on `Aryan` as `d839a57` … `3f68dd2` and **not pushed** (`origin/Aryan` is still at `4533665`). The judge script passes end to end (`npm run golden-path`).
+
+**Uncommitted in the working tree:** `docs/deploy.md` (table re-alignment only, probably an editor's Prettier), `server/scripts/check-redis.cjs` and the `check:redis` script in `server/package.json` (see "Local setup" below); `docs/demo.md` (the manual demo and testing guide, linked from the README).
+
+**Resume here:** §11's "Open" list, after fixing the local setup below.
+
+**Team change:** the auth teammate has stopped; the frontend teammate is doing `/badges` and one more page (to be confirmed). Everything else is integration work on `Aryan`.
 
 **Tests:**
 - `npm test` (`node --test`, every file): **245 pass**. The integration suites skip themselves without `TEST_MONGODB_URI`.
@@ -51,10 +57,10 @@ The running record of what's built, what was decided and what's left. Read this 
 
 | ID | Feature | Status |
 |---|---|---|
-| B-01 | Domain-restricted registration + email OTP | ❌ Teammate. Current auth is a mock with in-memory users |
-| B-02 | Email-pattern hints | ❌ Not started (the `User.emailHints` field exists) |
-| B-03 | ID-card upload + admin verification | ❌ Not started (model fields exist) |
-| B-04 | JWT auth + demo login | 🟡 Teammate's mock: login by `username`, demo user id `demo-user-id-001` isn't a database id, refresh tokens kept in memory |
+| B-01 | Domain-restricted registration + email OTP | ✅ Phase 1: `authService` + `authOtp` (peppered sha256 in Redis, 10 min, 5 tries), nodemailer (`config/mailer.js`), sign-up proof cookie |
+| B-02 | Email-pattern hints | ✅ Phase 1: `emailHints()` fills `User.emailHints` on register |
+| B-03 | ID-card upload + admin verification | ✅ Phase 2: `uploadService` (type from the bytes, 5 MB, private delivery for ID cards and evidence), `verificationService`, `/verification/*` and `/admin/verifications/*`, the member and admin pages |
+| B-04 | JWT auth + demo login | ✅ Phase 1: login by email, access token with the §7.1 claims, refresh-token families in Redis with rotation and per-family reuse detection, demo login gated by `DEMO_MODE`. The mock is deleted |
 | B-05 | RBAC + unit scope | 🟡 Scope enforced inside the services (`services/access.js`, state-machine relations); route middleware pending |
 | B-06 | Zod validation + error envelope | 🟡 The error handler sends the `architecture.md` §6 envelope (ZodError, CastError, ValidationError, E11000 and body-parser errors mapped). No `validate()` or Zod schemas yet (teammate) |
 | B-07 | OrgUnits + resource CRUD | ✅ Service done (`orgUnitService`, `resourceService`) |
@@ -72,7 +78,7 @@ The running record of what's built, what was decided and what's left. Read this 
 | B-19 | Audit log + timeline | ✅ Service done, including the audit query (`listAudit`) |
 | B-20 | Rate limiting | ✅ Middleware done, **not mounted** yet |
 | B-21 | pino logging, request ids, `/health` | ✅ Teammate's pino logger, request ids and HTTP log (PR #6); `/health` reports MongoDB and Redis as `architecture.md` §13.3 says |
-| B-22 | Seed script | ❌ Teammate |
+| B-22 | Seed script | ✅ `npm run seed`: 18 units, 7 badges, 13 resources, 6 demo users, manager assignment, 16 demo bookings in every state (through the services, with their reports, incidents, audit and notifications), cache flush; idempotent. Needs Redis for the bookings |
 
 ---
 
@@ -196,7 +202,11 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 |---|---|---|
 | `MONGODB_URI` | **Yes**: the server refuses to start without it | Include the database name in the path |
 | `REDIS_URL` | Yes | Upstash `rediss://…` TCP URL |
-| `PORT`, `CLIENT_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | Yes | — |
+| `PORT`, `CLIENT_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `OTP_PEPPER` | Yes | — |
+| `SEED_PASSWORD` | For `npm run seed` | The demo users' password |
+| `DEMO_MODE`, `ALLOWED_EMAIL_DOMAINS` | Optional | `DEMO_MODE=true` enables the demo buttons; domains default to `nitjsr.ac.in` |
+| `SMTP_*`, `MAIL_FROM` | For real email | Without `SMTP_HOST`, emails (OTPs included) are logged to the console outside production |
+| `CLOUDINARY_*` | From Phase 2 | ID cards, badge evidence and photos |
 | `CRON_ENABLED` | Optional | — |
 | `AI_*` | Optional | Only once AI features exist |
 
@@ -204,6 +214,7 @@ All of these are now reflected in `architecture.md` and `backend.md`.
 ```
 cd server
 npm install
+npm run seed                    # demo data; idempotent (needs SEED_PASSWORD)
 npm run dev                     # or npm start
 npm test                        # unit tests; integration suites skip themselves
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017 node --test test/integration   # use a local/test DB, never production
@@ -251,7 +262,54 @@ The high-severity fixes:
 
 ---
 
-## 11. Next steps (resume here)
+## 7b. Local setup status (29 Oct 2026)
 
-1. **Routes and controllers** for resources, org units, bookings, badges, incidents, notifications and the audit log, once the validators and real-user auth land.
-2. **Golden-path check** against the deployed app with the seeded demo users (`frontend.md` §11).
+The first `npm run dev` against your own `server/.env` showed three problems:
+1. **`MongoDB connected db: "test"`:** `MONGODB_URI` has no database name in its path. Add `/campuscommons` before the `?`, or the seed and all data land in `test`.
+2. **`ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET are the same`:** generate two different values, plus `OTP_PEPPER`, with `node -e 'for (let i = 0; i < 3; i++) console.log(require("crypto").randomBytes(48).toString("base64url"))'`. Never reuse values from old commits.
+3. **Redis `connect ETIMEDOUT`** against a Redis Cloud (redis.io) database. **Diagnosed: the network, not the config.** DNS resolves, but TCP to port 15363 times out. `portquiz.net` (which listens on every port) also times out on 15363, 15000 and 6379, while 80 and 443 connect. So this Wi-Fi blocks every outgoing port except web ports. For development, use a local Redis (`sudo docker run -d --name redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:7`, bound to localhost because it has no password, then `REDIS_URL=redis://127.0.0.1:6379`) or a phone hotspot. Keep Redis Cloud for Render. Whether its URL needs `redis://` or `rediss://` is still unknown: run `npm run check:redis` once from a hotspot. To re-check, run `cd server && npm run check:redis`. It prints the scheme, port and host suffix (never the password), then tests DNS, TCP and TLS separately and says what to change:
+   - **TCP timeout:** the network blocks the port, or the port is wrong. Redis Cloud's port is the database's own 5-digit one. Campus Wi-Fi often blocks it; try a hotspot. If that's the cause, use a local Redis for development and keep Redis Cloud for Render.
+   - **TLS result:** it tells you whether the URL should be `redis://` or `rediss://`.
+
+**Redis Cloud instead of Upstash** works with no code change. The server uses Lua scripts and `SCAN`, which Redis Cloud's `default` user can run. The URL is `redis://default:<password>@<host>:<port>` (`rediss://` if TLS is on). Put the database near Render (AWS `ap-southeast-1` or `ap-south-1`). `docs/deploy.md` §2 and a comment in `render.yaml` still describe Upstash.
+
+**Environment variables:** the server's are all in `server/.env.example`, with comments; `render.yaml` lists them for Render. In production, the server refuses to boot without `MONGODB_URI`, `REDIS_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `OTP_PEPPER` and `CLIENT_URL`, and each of the three secrets must be at least 32 characters. On Render, set `TRUST_PROXY_HOPS=2`, and use Brevo SMTP on port 2525 (the free plan blocks 25, 465 and 587). **The client has no environment variables:** the only setting is the `/api` rewrite destination in `client/vercel.json`, which you replace with the Render URL.
+
+---
+
+## 11. Next steps (resume here): the integration plan
+
+The goal is the judge script (`frontend.md` §11) working on localhost with real data and no mocks, then deployed. Each phase runs as one multi-agent workflow: builders on separate files, then backend, security, contract (and, for client phases, frontend and design) reviewers on the combined diff, then fixers who reproduce each finding before fixing it, then the test gate.
+
+1. ✅ **Phase 1: real auth and the seed script.** 21 review findings: 15 fixed, 4 duplicates, 2 deferred (below). 515 server tests, plus 6 new client tests.
+2. ✅ **Phase 2: uploads (Cloudinary) and ID verification**, server and client, plus `/admin/verifications`. 23 review findings: 18 fixed, 4 duplicates, 1 needed a client change (made). 573 server tests and 44 client tests. Real Cloudinary isn't exercised yet: the keys go in `server/.env`.
+3. ✅ **Phase 3: domain routers** over the existing services: org units, resources, badges and badge requests, bookings, incidents, notifications, audit. Every route is `verifyAuth` → `generalLimiter` (→ `blockSuspended` on writes), with thin controllers and route tests over HTTP. 21 review findings: 13 fixed (among them reasons over 500 characters skipping the audit, confirm-return leaving orphans, 500s on malformed checklist items, look-alike photo URLs from other Cloudinary accounts), 6 duplicates, 2 deferred (below). 649 server tests. The full API reference is `docs/api.md`.
+
+   **Deferred to Phase 4 (new endpoints):** a route for managers to open badge evidence (a 5-minute signed URL, like the ID-card viewer), and a user lookup (`GET /admin/users`) for manager assignment and direct badge grants. Also open: resource `images` on the listing form aren't run through the own-photo check yet.
+
+   **Found while writing `docs/api.md` (server fixes for Phase 4b):** `joinWaitlist` is truthy-checked, so `"false"` joins the waitlist; `purpose` is only checked by the model, after eligibility; the login limiter also counts `403 EMAIL_NOT_VERIFIED`, locking out unverified users who typed the right password; the manager's pending queue is silently capped at 500; `/bookings/check` and `POST /bookings` don't hide archived resources from non-managers.
+
+   **Decision needed: the demo admin's reach.** While `DEMO_MODE=true`, anyone can sign in as the seeded admin, and only the verification queue limits that account to demo users. Everywhere else (audit, the manager queue, incidents, badge requests, every admin write) it is a full admin. On a deployment that real students also use, that exposes their bookings, incidents and names. Options: (a) keep the demo deployment demo-only (`DEMO_MODE` off wherever real students sign up), or (b) scope demo staff accounts to demo data across every service.
+4. ✅ **Phase 4: the client on real data.**
+   - ✅ **4a:** shared kit (StatusBadge, Dialog, ReasonDialog, ConfirmDialog, ErrorState, Pagination, PhotoUploader, BookingTimeline, IST helpers in `lib/time.js`), the bookings API module and hooks; Explore, resource detail with the server's eligibility checklist, QuotaMeter, AvailabilityGrid and the BookingPanel; My bookings, booking detail, check-in and check-out; the manager's conflict queue, handovers and return confirmation. Mock data deleted. 21 review findings (all client): 17 fixed, 4 duplicates. 191 client tests; the client's API modules were also run against the real server on a seeded database.
+   - ✅ **4b:** incident pages (report, detail with thread and resolve, manage and admin lists), `/admin/audit` with deep links, `/manage/resources` and the full listing form, notifications and the header bell, the manage dashboard, and `/manage/badges` (in its own files, in case the teammate's version replaces it). Server: the six fixes found while writing `docs/api.md`, the badge-evidence viewer, grant by email, `GET /admin/users`, and demo accounts kept away from real members' evidence and grants. 16 seeded demo bookings in every state, made through the services. 22 review findings: 19 fixed, 3 duplicates. 693 server tests, 299 client tests.
+   - **`npm run golden-path -- <api url>`** walks judge steps 1–12 over HTTP with the demo logins and cleans up after itself. It passes all 12 steps on a fresh seed. Afterwards the demo student holds 3D Printing Basics, so run `npm run seed` again before a real demo.
+5. ✅ **Phase 5: hardening and deploy prep.**
+   - **Client:** vendor chunks and lazy loading (no chunk over 500 kB), the Dashboard tab, the `/admin` redirect, edit and report links on the resource page, contrast fixes; `frontend.md` §8.2 rewritten from the real query keys.
+   - **Server:** `trust proxy`, start-up checks (production refuses to boot without its secrets), coarse per-IP ceilings stacked on the email and role limits, a daily OTP-email cap with a per-network share, and a boot warning when `DEMO_MODE` is on and real accounts exist.
+   - **Deploy:** `render.yaml`, `client/vercel.json` (SPA fallback, `/api` rewrite, CSP and security headers), `docs/deploy.md` (step-by-step checklist, including the secret rotation), and a real `README.md`.
+   - **Review:** 10 findings (1 high: with one trusted hop, everyone behind Vercel shared one IP bucket), 7 fixed, 2 duplicates, 2 deferred (below).
+   - **Tests:** 738 server tests and 308 client tests; the golden path passes 12/12 after the hardening.
+
+**Open, in priority order:**
+1. **The member's `/badges` page (teammate).** Judge step 3, a student requesting a badge, can't be done in the UI until it lands: the API is ready (`POST /badges/:id/requests`, `GET /badges/mine`; see `docs/api.md`) and the eligibility checklist already links to `/badges?request=<code>`. If it doesn't arrive, it's a small page to build.
+2. **Deploying, with your accounts:** follow `docs/deploy.md`.
+   - Generate **new** JWT secrets and OTP pepper, because the old ones leaked in early commits.
+   - Render's free plan blocks the usual SMTP ports, so use Brevo on port 2525.
+   - `render.yaml` deploys `main`, so merge `Aryan` first.
+   - Run `npm run seed`, then `npm run golden-path -- <api url>`, then `npm run seed` again.
+3. **A shared secret between Vercel and Render.** A client calling the Render URL directly can forge `X-Forwarded-For` to dodge the per-IP ceilings and use up the daily OTP-email cap. The fix is Vercel Routing Middleware adding a secret header that the server checks.
+4. **The demo admin's reach (decision).** The boot warning is in place. Keep the judged instance demo-only, or scope demo staff accounts to demo data.
+5. **After this plan:** `/admin/users` and `/admin/org-units` pages (the `GET /admin/users` API exists), `/profile`, email for booking events (B-18), a badge revoke action, then the cool-to-have features.
+
+**Deferred from Phase 1 (decisions needed):** the documented "never key a rate limit on IP" rule leaves two gaps. (a) Rotating email addresses gets unlimited register/OTP emails and bcrypt work. (b) About 60 scripted demo-login requests per role lock the judges out for 15 minutes. The proposed fix is a coarse per-IP ceiling stacked on the existing per-email and per-role limits, plus a global daily OTP-mail cap and `app.set('trust proxy', 1)` for Render.

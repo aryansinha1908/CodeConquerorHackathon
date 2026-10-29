@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useId } from 'react';
 import { cn } from '../../lib/utils';
 import { ChevronDown } from 'lucide-react';
 
@@ -6,7 +6,10 @@ export const Select = forwardRef(function Select(
   { label, error, hint, id, options = [], className, containerClassName, children, ...props },
   ref
 ) {
-  const selectId = id ?? `select-${Math.random().toString(36).slice(2)}`;
+  // useId, not Math.random: the id stays the same on every render, so the label and the
+  // aria-describedby links keep pointing at this control.
+  const generatedId = useId();
+  const selectId = id ?? `select-${generatedId}`;
   const errorId = `${selectId}-error`;
   const hintId = `${selectId}-hint`;
 

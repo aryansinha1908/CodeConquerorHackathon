@@ -63,6 +63,7 @@ import {
   readText,
   requireUser,
 } from "./params.js";
+import { photoProblems } from "./uploadService.js";
 
 const ELIGIBLE_CAP = 200;
 const MAX_RANGE_DAYS = 14;
@@ -494,8 +495,20 @@ function formPaths(input, { creating }) {
     }
   }
   checkLists(paths, problems);
+  checkImages(paths, problems);
   assertValid(problems, "field");
   return paths;
+}
+
+// Each image must be a photo that POST /uploads/images stored in our Cloudinary account, the same
+// check as for condition and incident photos: otherwise a listing could show any URL to every member
+// (a tracking pixel, someone else's picture). Run after checkLists has made sure the list is a list,
+// and only for entries it didn't already refuse, so an entry is never marked twice.
+function checkImages(paths, problems) {
+  if (!Array.isArray(paths.images)) return;
+  const marked = new Set(problems.map((p) => p.path));
+  for (const problem of photoProblems(paths.images, "images"))
+    if (!marked.has(problem.path)) problems.push(problem);
 }
 
 // Each listed id must name a document. Per-index paths let the form mark the exact entry.

@@ -1,0 +1,134 @@
+# Render Blueprint for the CampusCommons API (server/). Step-by-step setup: docs/deploy.md.
+#
+# Render → New → Blueprint → pick this repository. Render creates the web service below, asks for
+# every `sync: false` value, and makes the `generateValue` secrets itself (they never leave Render).
+# Change the `value:` keys here rather than in the dashboard: a Blueprint sync puts them back to
+# what this file says. The `sync: false` values are asked for once, at creation, and later syncs
+# leave them alone.
+#
+# The client is a separate Vercel project (client/vercel.json) that rewrites /api/* to this
+# service, so the browser only ever talks to the Vercel origin and the refresh cookie stays
+# first-party (architecture.md §2, §18).
+services:
+  - type: web
+    name: campuscommons-api
+    runtime: node
+    # Render's region closest to Jamshedpur. Put the Atlas cluster and the Upstash database in the
+    # same AWS region (ap-southeast-1, Singapore): each API request makes several round trips to
+    # MongoDB and Redis, so that hop matters more than the browser's.
+    region: singapore
+    # Free instances sleep after about 15 idle minutes, and a sleeping process runs no cron
+    # (architecture.md §14). Ping /health every 10 minutes during judging (docs/deploy.md), or switch
+    # to a paid plan for the judging window. Free instances also block outbound SMTP on the usual
+    # ports: see SMTP_PORT below.
+    plan: free
+    # The branch Render builds. Change it if you deploy before the work is merged into main.
+    branch: main
+    # Only server/ is built, and changes outside it don't trigger a deploy.
+    rootDir: server
+    # NODE_ENV=production is set below, so npm ci leaves out the dev dependencies (pino-pretty,
+    # ioredis-mock); production logs are JSON and need neither.
+    buildCommand: npm ci
+    startCommand: npm start
+    # 200 while MongoDB is up (Redis down is "degraded", still 200), 503 otherwise
+    # (architecture.md §13.3). A new deploy only goes live once this answers 200.
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      # Node 22 LTS, as architecture.md §18 says (Vite 8 and Mongoose 9 need at least 20.19).
+      - key: NODE_VERSION
+        value: "22"
+      # production: JSON logs at info, Secure cookies, OTP_PEPPER required, and OTP emails are never
+      # written to the log.
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      # Render's default. Render sends traffic to whatever port the server listens on.
+      - key: PORT
+        value: "10000"
+      # The Vercel site's origin, no trailing slash, e.g. https://<project>.vercel.app. Used in the
+      # links of emails and for CORS on direct calls. Required in production: the server refuses to
+      # start without it, so give the expected Vercel URL now and correct it later if needed.
+      - key: CLIENT_URL
+        sync: false
+      # The proxies on the site's path, Vercel and then Render's own, whose forwarded addresses the
+      # per-IP sign-in and code-email ceilings key on. "2" gives each visitor their own ceilings.
+      # "1" would key them on Vercel's address, so one visitor could lock every other visitor out of
+      # sign-in, sign-up and the demo roles. Someone calling the onrender.com URL directly can put
+      # extra entries in X-Forwarded-For to get fresh ceilings of their own, but never another
+      # visitor's. Check it after the first deploy (docs/deploy.md §9, "Client addresses").
+      - key: TRUST_PROXY_HOPS
+        value: "2"
+
+      # MongoDB Atlas, with the database name in the path: mongodb+srv://…mongodb.net/campuscommons?…
+      - key: MONGODB_URI
+        sync: false
+      # Upstash's TCP URL (rediss://default:<password>@<host>.upstash.io:6379), not the REST URL.
+      - key: REDIS_URL
+        sync: false
+
+      # New random values made by Render. Never paste values from a local .env or an old commit:
+      # the secrets in this repository's early history are public and must not be used anywhere.
+      - key: ACCESS_TOKEN_SECRET
+        generateValue: true
+      - key: REFRESH_TOKEN_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+
+      - key: ALLOWED_EMAIL_DOMAINS
+        value: nitjsr.ac.in
+      # A deliberate choice: "true" for the judged instance. It shows the role buttons on the login
+      # page and lets anyone sign in as the seeded @demo.campuscommons.test users, the demo admin
+      # included. That admin is kept away from real members' ID cards, badge evidence and the user
+      # list, but it still reads the whole audit log, every booking queue and every incident
+      # (progress.md §11). So this instance is demo-only: don't invite real students to it. A
+      # deployment for real members gets its own service and database with DEMO_MODE "false"
+      # (which also stops the demo accounts signing in).
+      - key: DEMO_MODE
+        value: "true"
+      # The server never reads this; only `npm run seed` (and the golden-path fallback) do. Recorded
+      # here so the password in the judges' testing notes lives next to the deployment. Optional.
+      - key: SEED_PASSWORD
+        sync: false
+
+      # Email for OTP codes and notices. Brevo: smtp-relay.brevo.com, your SMTP login, an SMTP key.
+      # Gmail: smtp.gmail.com, the address, a 16-character app password. Without SMTP_HOST, codes
+      # are neither sent nor (in production) logged, so nobody can finish registering.
+      - key: SMTP_HOST
+        sync: false
+      # Render's free instances block outbound SMTP on 25, 465 and 587: use Brevo on 2525 there.
+      # 465 means TLS from the start; any other port upgrades with STARTTLS.
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      # A sender Brevo has verified, or the Gmail address itself, e.g. CampusCommons <you@example.com>.
+      - key: MAIL_FROM
+        sync: false
+
+      # Cloudinary (ID cards, badge evidence and condition photos). Without all three, uploads answer
+      # 503 and the rest of the API works.
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # The 5-minute sweeper: reminders, no-shows, overdue returns.
+      - key: CRON_ENABLED
+        value: "true"
+
+      # AI quota: read only once AI features exist; the defaults from .env.example.
+      - key: AI_USER_BURST_SECONDS
+        value: "10"
+      - key: AI_USER_DAILY_LIMIT
+        value: "5"
+      - key: AI_GLOBAL_RPM
+        value: "8"
+      - key: AI_GLOBAL_DAILY_LIMIT
+        value: "50"

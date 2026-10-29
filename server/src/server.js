@@ -3,6 +3,7 @@ import "dotenv/config";
 import { once } from "node:events";
 import app from "./app.js";
 import { connectDb, disconnectDb } from "./config/db.js";
+import { checkDemoMode, reportEnv } from "./config/env.js";
 import { connectRedis, disconnectRedis } from "./config/redis.js";
 import { startSweeper, stopSweeper } from "./jobs/sweeper.js";
 import { setLogger } from "./lib/log.js";
@@ -59,6 +60,9 @@ process.once("unhandledRejection", (reason) => {
 async function start() {
   await connectDb();
   if (shuttingDown) return;
+  const demoWarning = await checkDemoMode();
+  if (demoWarning) logger.warn(demoWarning);
+  if (shuttingDown) return;
   await connectRedis({ logger });
   if (shuttingDown) return;
   startSweeper();
@@ -71,6 +75,12 @@ async function start() {
   await once(server, "listening");
 }
 
-start().catch((error) => {
-  void shutdown("startupFailure", error);
-});
+// config/env.js: in production a missing setting or a short secret stops the boot before anything
+// connects; elsewhere it's a warning. Nothing is open yet, so setting the exit code is enough.
+if (reportEnv(logger)) {
+  start().catch((error) => {
+    void shutdown("startupFailure", error);
+  });
+} else {
+  process.exitCode = 1;
+}

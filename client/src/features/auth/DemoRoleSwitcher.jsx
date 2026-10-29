@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Zap } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
 import { demoLogin } from './api';
 import { toast } from 'sonner';
 
@@ -13,8 +12,8 @@ const ROLE_LABELS = {
 };
 
 /**
- * Demo role switcher — shown only when the API reports DEMO_MODE.
- * Calls POST /auth/demo-login and passes the token up.
+ * Demo role switcher — shown only when GET /auth/demo-config reports demoMode.
+ * Calls POST /auth/demo-login and passes the session ({ accessToken, user }) up.
  */
 export function DemoRoleSwitcher({ roles, onLogin }) {
   const [loading, setLoading] = useState(null); // the role currently loading
@@ -23,10 +22,14 @@ export function DemoRoleSwitcher({ roles, onLogin }) {
     setLoading(role);
     try {
       const res = await demoLogin(role);
-      onLogin(res.data.accessToken);
+      const { accessToken, user } = res.data;
+      onLogin(accessToken, user);
       toast.success(`Logged in as demo ${ROLE_LABELS[role]?.label ?? role}`);
     } catch (err) {
-      toast.error(err.message ?? 'Demo login failed');
+      // 404 "Run npm run seed" when the demo users are missing; 429 from the demo limiter.
+      toast.error(err.message ?? 'Demo login failed', {
+        description: err.requestId ? `ref: ${err.requestId}` : undefined,
+      });
     } finally {
       setLoading(null);
     }

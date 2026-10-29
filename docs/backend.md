@@ -94,7 +94,7 @@
 | B-17 | `node-cron` sweeper | 9 | 3 | 2 | Every 5 min: reminders, no-show, overdue, expiry of waitlisted and undecided requests; claims each booking before acting, so it's idempotent; Redis-locked, and still runs if Redis is down |
 | B-18 | Notifications: in-app + email | 6–9 | 2 | 2 | `notifyService.send(users, event, data)`; email only for key events |
 | B-19 | Audit log + booking timeline | 10 | 3 | 2 | Append-only collection; timeline = audit entries plus condition reports merged by time |
-| B-20 | Rate limiting keyed by user or email (**never IP**) | — | 2 | 1 | `express-rate-limit` with a small Redis store (`lib/redisRateLimitStore.js`); tiers in `architecture.md` §11 |
+| B-20 | Rate limiting keyed by user, email or demo role; coarse per-IP ceilings stacked on the public auth routes (**never IP alone**) | — | 2 | 1 | `express-rate-limit` with a small Redis store (`lib/redisRateLimitStore.js`). `register`, `login` and `demo-login` each add an IP tier after their email or role tier (100 sign-ups an hour, 100 failed logins per 15 min, 60 demo logins per role and IP per 15 min, under 1000 per role). The IP tiers key on every address the trusted proxies forwarded (`TRUST_PROXY_HOPS`, 2 behind Vercel and Render), so visitors behind one Vercel address keep their own counters. Code emails: 50 a day per network (`otpSendIp`, on register, resend-otp and the unverified login), and a global cap of 250 in any 24 hours, then register and resend-otp answer 503. Tiers in `architecture.md` §11 |
 | B-21 | pino logging, request IDs, `/health` | — | 1 | 1 | Redaction of secrets and PII |
 | B-22 | Seed script (real NIT JSR units, fictional people and inventory) | demo | 2 | 1 | `npm run seed`, idempotent; data in §9 |
 
@@ -145,7 +145,7 @@ server/
     ├── app.js              # express app: middleware order, routers, error handler
     ├── server.js           # connect Mongo + Redis, start HTTP, start cron
     ├── config/
-    │   ├── env.js          # Zod-validated process.env (boot fails on bad config)
+    │   ├── env.js          # start-up checks: production won't boot without the required settings
     │   ├── db.js  redis.js  cloudinary.js  mailer.js
     ├── models/             # User, OrgUnit, Resource, Badge, UserBadge, Booking,
     │                       # ConditionReport, Incident, Notification, AuditLog
@@ -386,7 +386,7 @@ Covered in [`architecture.md` §14](./architecture.md#14-scheduled-jobs-mvp-node
 
 ## 7. Validation catalogue
 
-Every route has a Zod schema in `validators/`. The `validate` middleware parses `req.body`, `req.params` and `req.query`, replaces them with the parsed values, and turns `ZodError` into `400 VALIDATION_ERROR` with `details[{ path, message }]`.
+**Changed during integration (Oct 2026): the services are the validation layer.** Every service checks its own input with `services/params.js` and answers `400 VALIDATION_ERROR` with `details[{ path, message }]`, so the controllers pass `req.body`, `req.params` and `req.query` straight through and there is no `validators/` folder. Express 5's default query parser can't build objects such as `{ $ne: … }` from a query string. The rules below still describe what each input must satisfy; the auth service applies its rows itself, before the rate limiters, which key on the validated email.
 
 **Shared primitives:**
 
@@ -556,7 +556,7 @@ The `test` script in `package.json` should be `node --test`.
 | Bookings API | Ineligible request → 422 with checklist; **two concurrent requests for the last slot → exactly one `pending`, one `waitlisted`**; reject → waitlist promotion; cancel by member; manager of another unit → 403 |
 | Sweeper | No-show after grace → `no_show` plus promotion; overdue → flag plus system incident; running twice changes nothing |
 | Auth | Non-`nitjsr.ac.in` email → 400; wrong OTP 5 times → OTP invalidated; refresh rotation and reuse detection |
-| Rate limits | 6th failed login for one email → 429 with `Retry-After`; **a different email from the same IP is unaffected** |
+| Rate limits | 6th failed login for one email → 429 with `Retry-After`; **a different email from the same IP is unaffected** until that IP's coarse ceiling (100 failures in 15 min), and a login the ceiling refuses doesn't count against the account; a forged `X-Forwarded-For` entry gets no fresh counter, and IPv6 is counted per /56; behind Vercel and Render (the hop count `render.yaml` ships), one visitor's failures, demo logins or code requests don't lock out another behind the same Vercel address, and a direct caller who forges a visitor's address gets a counter of their own; one network's 50 code emails a day used up → that network gets 429 `otpSendIp` on register and resend-otp and an unverified login sends no code, while other networks sign up; a demo role used up from one network still signs in from another, under the role-wide ceiling; code-email cap used up → register and resend-otp 503 for every address with nothing written or sent, login 403 without a code |
 | AI quota | 6th AI call in a day → 429 `AI_QUOTA_EXCEEDED`; cache hit doesn't consume quota; Redis down → AI disabled, normal search OK |
 | Golden path (e2e API script) | The full lifecycle with the seeded demo users; run against the deployed URL before submission |
 

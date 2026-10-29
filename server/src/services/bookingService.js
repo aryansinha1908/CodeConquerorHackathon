@@ -1,5 +1,6 @@
-// Booking lifecycle (backend.md §6, architecture.md §5 and §9). Controllers pass the Zod-validated
-// input and req.user.id; every change is audited and notified (bookingTransitions.js).
+// Booking lifecycle (backend.md §6, architecture.md §5 and §9). Controllers pass the request body as
+// it came and req.user.id, so every field read here is checked here, before anything is written;
+// every change is audited and notified (bookingTransitions.js).
 //
 // Concurrency: creating and approving run under the resource lock (lib/lock.js), so the capacity
 // count and the write can't interleave with another request for the same resource. Every status
@@ -19,6 +20,7 @@ import { keys } from "../lib/redisKeys.js";
 import {
   ServiceError,
   forbidden,
+  fromValidationError,
   invalid,
   notFound,
 } from "../lib/serviceError.js";
@@ -29,6 +31,7 @@ import {
   Incident,
   User,
 } from "../models/index.js";
+import { managesUnit } from "./access.js";
 import { record } from "./auditService.js";
 import {
   eligibilityContext,
@@ -49,34 +52,104 @@ import {
 import { OUTCOME_LABELS, send } from "./notifyService.js";
 import {
   assertValid,
+  isId,
+  isPlainObject,
   readEnum,
+  readEnumList,
+  readFlag,
   readId,
   readInstant,
   readPaging,
+  readText,
   requireUser,
 } from "./params.js";
 import { promoteFreedSlot, snapshot } from "./waitlistService.js";
 
 export { SYSTEM };
 
+// The pending view groups requests in memory, so it reads at most this many (the oldest); meta.capped
+// says when there were more, rather than the queue quietly looking shorter than it is.
 const QUEUE_CAP = 500;
+// Booking.purpose, checked by the service so the member hears about it before the eligibility work.
+const PURPOSE = { min: 10, max: 300 };
+// decision.reason and cancellation.reason (backend.md §7 bookings.reject / waitlist / cancel).
+const MAX_REASON = 500;
+// A return note is the report's notes and the audit entry's reason, both at most 1000.
+const MAX_NOTE = 1000;
+
+// Managers see the borrower's name, member type and department, never their email or ID card
+// (architecture.md §16), with the department as { _id, code, name } as on every other list.
+const BORROWER = {
+  path: "borrower",
+  select: "name memberType department",
+  populate: { path: "department", select: "code name" },
+};
 
 const fromCheck = (check) =>
   new ServiceError(check.status, check.code, check.message, check.details);
-const slotOf = ({ start, end }) => ({
-  start: new Date(start),
-  end: new Date(end),
-});
+
+// start and end, checked before anything is loaded: an unparsed start would otherwise reach the
+// overlap query and come back as a CastError on `end`.
+function slotOf(input, problems) {
+  return {
+    start: readInstant(input.start, "start", problems, { required: true }),
+    end: readInstant(input.end, "end", problems, { required: true }),
+  };
+}
+
+function readSlot(input) {
+  const problems = [];
+  const slot = slotOf(input, problems);
+  assertValid(problems);
+  return slot;
+}
+
+// The whole POST /bookings body, before the resource is loaded or locked. purpose used to reach only
+// the model, after every rule had passed, so a member with a short purpose heard about it last.
+// joinWaitlist goes through readFlag: only true or "true" joins. "false" used to join by being
+// truthy; any value that is neither is now a 400 rather than a guess.
+function readRequest(input) {
+  const problems = [];
+  const request = {
+    ...slotOf(input, problems),
+    purpose: readText(input.purpose, "purpose", problems, {
+      ...PURPOSE,
+      required: true,
+    }),
+    joinWaitlist: readFlag(input.joinWaitlist, "joinWaitlist", problems),
+  };
+  assertValid(problems);
+  return request;
+}
 const managersOf = (resource) => resource.orgUnit?.managers ?? [];
 
+// A :id or resourceId that can't be an ObjectId names nothing: 404 like an unknown id, rather than a
+// CastError (400 on "_id") or an operator object such as { $ne: null } reaching the query.
 async function requireResource(resourceId) {
-  const resource = await loadResource(resourceId);
+  const resource = isId(resourceId) ? await loadResource(resourceId) : null;
   if (!resource) throw notFound("Resource");
   return resource;
 }
 
+// The member and the resource they check or request a slot on. An archived resource is 404 for
+// anyone but its unit's managers, as on every resource read (resourceService's rule), so the check
+// and the request don't reveal what GET /resources/:id hides. Its managers still get the checklist,
+// where RESOURCE_ACTIVE says why it can't be booked. Decisions, handovers and returns on existing
+// bookings use requireResource alone: those must go on after a resource is archived.
+async function requesterAndResource(userId, resourceId) {
+  const [user, resource] = await Promise.all([
+    requireUser(userId),
+    requireResource(resourceId),
+  ]);
+  if (resource.status === "archived" && !managesUnit(user, resource.orgUnit))
+    throw notFound("Resource");
+  return [user, resource];
+}
+
 async function requireBooking(bookingId) {
-  const booking = await Booking.findById(bookingId).lean();
+  const booking = isId(bookingId)
+    ? await Booking.findById(bookingId).lean()
+    : null;
   if (!booking) throw notFound("Booking");
   return booking;
 }
@@ -112,11 +185,8 @@ function ineligible(evaluation) {
 
 // POST /bookings/check: the evaluation POST /bookings enforces, without creating anything.
 export async function checkBooking(userId, input, { now = new Date() } = {}) {
-  const [user, resource] = await Promise.all([
-    requireUser(userId),
-    requireResource(input.resourceId),
-  ]);
-  const slot = slotOf(input);
+  const slot = readSlot(input);
+  const [user, resource] = await requesterAndResource(userId, input.resourceId);
   const ctx = await eligibilityContext(user, resource, slot, { now });
   const evaluation = evaluate(user, resource, slot, ctx);
   return {
@@ -126,27 +196,24 @@ export async function checkBooking(userId, input, { now = new Date() } = {}) {
   };
 }
 
-// POST /bookings → { booking, evaluation, waitlistPosition }
-// Throws 422 INELIGIBLE, 409 SLOT_TAKEN (unless joinWaitlist) or 503 when the lock is unavailable.
+// POST /bookings. input: { resourceId, start, end, purpose (10–300), joinWaitlist? }
+// → { booking, evaluation, waitlistPosition }
+// Throws 400 (the body), 404, 422 INELIGIBLE, 409 SLOT_TAKEN (unless joinWaitlist) or 503 when the
+// lock is unavailable.
 export async function createBooking(
   userId,
   input,
   { now = new Date(), requestId } = {},
 ) {
-  const [user, resource] = await Promise.all([
-    requireUser(userId),
-    requireResource(input.resourceId),
-  ]);
-  const slot = slotOf(input);
+  const { purpose, joinWaitlist, ...slot } = readRequest(input);
+  const [user, resource] = await requesterAndResource(userId, input.resourceId);
 
   const { booking, evaluation, position } = await withLock(
     keys.resourceLock(resource._id),
     async () => {
       const ctx = await eligibilityContext(user, resource, slot, { now });
       const evaluation = evaluate(user, resource, slot, ctx);
-      const { status, error } = requestStatus(evaluation, {
-        joinWaitlist: input.joinWaitlist,
-      });
+      const { status, error } = requestStatus(evaluation, { joinWaitlist });
       const position = ctx.waitlistAhead + 1;
       if (error === "INELIGIBLE") throw ineligible(evaluation);
       if (error === "SLOT_TAKEN") {
@@ -162,7 +229,7 @@ export async function createBooking(
         orgUnit: resource.orgUnit._id,
         borrower: user._id,
         ...slot,
-        purpose: input.purpose,
+        purpose,
         status,
         eligibilitySnapshot: snapshot(evaluation),
         ...(status === "approved" && {
@@ -226,6 +293,15 @@ function decisionFields(action, actor, payload, now) {
   return {};
 }
 
+// Checked before the update: applyTransition writes the booking first, so a reason the model or the
+// audit log refused afterwards would leave a change with no audit entry and no notice.
+function assertDecisionText(payload) {
+  const problems = [];
+  for (const path of ["reason", "note"])
+    readText(payload[path], path, problems, { max: MAX_REASON });
+  assertValid(problems, "field");
+}
+
 // approve (payload.note?) | reject | waitlist (payload.reason) | cancel (reason unless the borrower);
 // the sweeper's expire | markNoShow and incident resolution's closeFlagged pass actorId = SYSTEM.
 // Check-in, check-out and return confirmation have their own functions below.
@@ -257,6 +333,7 @@ export async function transition(
       now,
     });
     if (!check.ok) throw fromCheck(check);
+    assertDecisionText(payload);
     if (action === "approve") {
       const used = await slotUsage(resource._id, current, {
         excludeId: current._id,
@@ -300,8 +377,27 @@ export async function transition(
 
 // ── Handovers and returns ───────────────────────────────────────────────────
 
+// A list of { label, ok, note? } objects. Anything else is a 400 on items, not a TypeError on
+// item.label (a 500).
+function assertItemList(items) {
+  if (!Array.isArray(items))
+    throw invalid("The checklist items must be a list.", [
+      { path: "items", message: "Must be a list." },
+    ]);
+  const problems = [];
+  for (let i = 0; i < items.length; i++) {
+    if (!isPlainObject(items[i]) || typeof items[i].label !== "string")
+      problems.push({
+        path: `items.${i}`,
+        message: "Must be an object with a label.",
+      });
+  }
+  assertValid(problems, "item");
+}
+
 // Every checklist item exactly once, nothing else (backend.md §7, bookings.checkIn).
 function assertChecklist(resource, items = []) {
+  assertItemList(items);
   const expected = resource.checklist ?? [];
   const labels = items.map((item) => item.label);
   const problems = [
@@ -319,6 +415,17 @@ function assertChecklist(resource, items = []) {
       problems.map((message) => ({ path: "items", message })),
     );
   }
+}
+
+// After a failed transition, deletes the records this request created for it, unless the booking
+// update went through and points at them (the audit entry or a notice failed afterwards): deleting
+// them then would leave the booking pointing at nothing, a flagged one stuck for good. When that
+// can't be checked, they are kept.
+async function undoUnlinked(bookingId, link, undo) {
+  const linked = await Booking.exists({ _id: bookingId, ...link }).catch(
+    () => true,
+  );
+  if (!linked) await undo().catch(() => {});
 }
 
 async function createReport(booking, resource, phase, actor, report) {
@@ -384,7 +491,9 @@ async function handover(
       requestId,
     });
   } catch (err) {
-    await ConditionReport.deleteOne({ _id: saved._id }).catch(() => {});
+    await undoUnlinked(booking._id, { [`${field}.report`]: saved._id }, () =>
+      ConditionReport.deleteOne({ _id: saved._id }),
+    );
     throw err;
   }
 }
@@ -470,27 +579,22 @@ export async function confirmReturn(
     now,
   });
   if (!check.ok) throw fromCheck(check);
-  if (input.items?.length) assertChecklist(resource, input.items);
 
-  const note = input.note ?? input.notes;
-  const overall =
-    action === "confirmOk"
-      ? "good"
-      : input.incident.severity === "high"
-        ? "damaged"
-        : "minor_issue";
-  const report =
-    input.items?.length || input.photos?.length
-      ? await createReport(booking, resource, "return_confirmation", actor, {
-          items: input.items,
-          photos: input.photos,
-          overall,
-          notes: note,
-        })
-      : null;
-  const incident =
+  // Everything is checked before anything is saved, so a refused return leaves no report behind
+  // (one per phase: it would turn the corrected retry into a 409).
+  // items is optional here; when sent, it is the whole checklist (an empty list counts as none).
+  if (input.items != null) {
+    assertItemList(input.items);
+    if (input.items.length) assertChecklist(resource, input.items);
+  }
+  const problems = [];
+  readText(input.note, "note", problems, { max: MAX_NOTE });
+  readText(input.notes, "notes", problems, { max: MAX_NOTE });
+  assertValid(problems, "field");
+  // The incident's own fields get the model's paths and messages (type, severity, description).
+  const draft =
     action === "confirmIssue"
-      ? await Incident.create({
+      ? new Incident({
           booking: booking._id,
           resource: resource._id,
           orgUnit: booking.orgUnit,
@@ -502,9 +606,30 @@ export async function confirmReturn(
           photos: input.photos ?? [],
         })
       : null;
+  await draft?.validate().catch((err) => {
+    throw fromValidationError(err);
+  });
 
+  const note = input.note ?? input.notes;
+  const overall =
+    action === "confirmOk"
+      ? "good"
+      : input.incident.severity === "high"
+        ? "damaged"
+        : "minor_issue";
+  let report = null;
+  let incident = null;
   let updated;
   try {
+    if (input.items?.length || input.photos?.length)
+      report = await createReport(
+        booking,
+        resource,
+        "return_confirmation",
+        actor,
+        { items: input.items, photos: input.photos, overall, notes: note },
+      );
+    if (draft) incident = await draft.save();
     updated = await applyTransition({
       booking,
       resource,
@@ -523,10 +648,19 @@ export async function confirmReturn(
       requestId,
     });
   } catch (err) {
-    await Promise.all([
-      report && ConditionReport.deleteOne({ _id: report._id }),
-      incident && Incident.deleteOne({ _id: incident._id }),
-    ]).catch(() => {});
+    // The update sets the report and pushes the incident together: either one shows it went through.
+    if (report || incident)
+      await undoUnlinked(
+        booking._id,
+        incident
+          ? { incidents: incident._id }
+          : { "returnConfirmation.report": report._id },
+        () =>
+          Promise.all([
+            report && ConditionReport.deleteOne({ _id: report._id }),
+            incident && Incident.deleteOne({ _id: incident._id }),
+          ]),
+      );
     throw err;
   }
 
@@ -552,12 +686,15 @@ export async function getBooking(
   viewerId,
   { now = new Date() } = {},
 ) {
+  // The same id guard as requireBooking, for the two reads that populate their own query.
   const [booking, viewer] = await Promise.all([
-    Booking.findById(bookingId)
-      .populate("resource", "title slug location bookingMode checklist")
-      .populate("borrower", "name memberType department")
-      .populate("orgUnit", "name code")
-      .lean(),
+    isId(bookingId)
+      ? Booking.findById(bookingId)
+          .populate("resource", "title slug location bookingMode checklist")
+          .populate(BORROWER)
+          .populate("orgUnit", "name code")
+          .lean()
+      : null,
     requireUser(viewerId),
   ]);
   if (!booking) throw notFound("Booking");
@@ -571,15 +708,25 @@ export async function getBooking(
   };
 }
 
-// GET /bookings/mine. query: { status, page, limit } → { items, meta }, latest start first.
+// GET /bookings/mine. query: { status, page, limit } → { items, meta }, latest start first. status is
+// one value, a comma list or a repeated key, so a tab such as "Upcoming" (approved, checked_in) is
+// one paged request.
 export async function listMine(userId, query = {}) {
   const user = await requireUser(userId);
   const problems = [];
-  const status = readEnum(query.status, BOOKING_STATUSES, "status", problems);
+  const statuses = readEnumList(
+    query.status,
+    BOOKING_STATUSES,
+    "status",
+    problems,
+  );
   const { page, limit } = readPaging(query, problems);
   assertValid(problems);
 
-  const filter = { borrower: user._id, ...(status && { status }) };
+  const filter = {
+    borrower: user._id,
+    ...(statuses && { status: { $in: statuses } }),
+  };
   const [items, total] = await Promise.all([
     Booking.find(filter)
       .sort({ start: -1 })
@@ -622,21 +769,20 @@ export async function listForManager(managerId, query = {}) {
     }),
   };
   const withPeople = (query) =>
-    query
-      .populate("resource", "title slug quantity")
-      .populate("borrower", "name memberType department")
-      .lean();
+    query.populate("resource", "title slug quantity").populate(BORROWER).lean();
 
   if (status === "pending") {
-    const competing = await withPeople(
+    // One past the cap, so "exactly 500" and "more than 500" can be told apart.
+    const read = await withPeople(
       Booking.find({ ...filter, status: { $in: ["pending", "waitlisted"] } })
-        .sort({ createdAt: 1 })
-        .limit(QUEUE_CAP),
+        .sort({ createdAt: 1, _id: 1 })
+        .limit(QUEUE_CAP + 1),
     );
-    const groups = groupConflicts(competing);
+    const capped = read.length > QUEUE_CAP;
+    const groups = groupConflicts(capped ? read.slice(0, QUEUE_CAP) : read);
     return {
       groups: groups.slice((page - 1) * limit, page * limit),
-      meta: { page, limit, total: groups.length },
+      meta: { page, limit, total: groups.length, capped },
     };
   }
 
@@ -656,7 +802,9 @@ export async function listForManager(managerId, query = {}) {
 // GET /bookings/:id/timeline: audit entries, condition reports and incidents, oldest first.
 export async function getTimeline(bookingId, viewerId) {
   const [booking, viewer] = await Promise.all([
-    Booking.findById(bookingId).populate("orgUnit", "code").lean(),
+    isId(bookingId)
+      ? Booking.findById(bookingId).populate("orgUnit", "code").lean()
+      : null,
     requireUser(viewerId),
   ]);
   if (!booking) throw notFound("Booking");

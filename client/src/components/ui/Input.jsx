@@ -1,16 +1,19 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useId } from 'react';
 import { cn } from '../../lib/utils';
 
 /**
  * Hacktoberfest-themed Input.
  * Pass `error` (string) to show the error state.
- * Pass `label` and `id` for accessible label binding.
+ * Pass `label` to bind a visible label; `id` is optional (a stable one is generated).
  */
 export const Input = forwardRef(function Input(
   { label, error, hint, id, className, containerClassName, ...props },
   ref
 ) {
-  const inputId = id ?? `input-${Math.random().toString(36).slice(2)}`;
+  // useId, not Math.random: the id stays the same on every render, so the label and the
+  // aria-describedby links keep pointing at this control.
+  const generatedId = useId();
+  const inputId = id ?? `input-${generatedId}`;
   const errorId = `${inputId}-error`;
   const hintId = `${inputId}-hint`;
 

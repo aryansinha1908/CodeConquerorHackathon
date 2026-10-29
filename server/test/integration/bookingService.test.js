@@ -6,6 +6,8 @@ import {
   AuditLog,
   Booking,
   ConditionReport,
+  Incident,
+  Resource,
   User,
   UserBadge,
 } from "../../src/models/index.js";
@@ -15,6 +17,7 @@ import {
   checkIn,
   checkOut,
   confirmReturn,
+  createBooking,
   getBooking,
   getTimeline,
   listForManager,
@@ -197,6 +200,121 @@ describe("bookingService", { skip }, () => {
         weekly.details[0].message,
         "You've used 2 of 3 hours this week on this resource.",
       );
+    });
+
+    test("purpose is checked before the eligibility work, with the slot's problems, and stored trimmed", async () => {
+      // An ineligible member hears about the purpose first: 400, not 422 and then 400.
+      await UserBadge.deleteMany({ user: f.student._id });
+      const short = await failure(book(f.student, TUE, { purpose: "Print" }));
+      assert.deepEqual(
+        [short.status, short.code, short.details],
+        [
+          400,
+          "VALIDATION_ERROR",
+          [{ path: "purpose", message: "Must be at least 10 characters." }],
+        ],
+      );
+      const cases = [
+        [{ purpose: undefined }, "Required."],
+        [{ purpose: "   " }, "Required."],
+        [{ purpose: 42 }, "Must be text."],
+        [{ purpose: "x".repeat(301) }, "Can be at most 300 characters."],
+      ];
+      for (const [extra, message] of cases) {
+        const err = await failure(book(f.student2, TUE, extra));
+        assert.deepEqual(err.details, [{ path: "purpose", message }]);
+      }
+      // Every problem at once, before the resource is even looked up.
+      const all = await failure(
+        createBooking(
+          f.student2._id,
+          { resourceId: "printer", start: "soon", purpose: "Print" },
+          opts,
+        ),
+      );
+      assert.deepEqual(
+        all.details.map((d) => d.path),
+        ["start", "end", "purpose"],
+      );
+      assert.equal(await Booking.countDocuments(), 0);
+      assert.equal(await AuditLog.countDocuments(), 0);
+
+      const { booking } = await book(f.student2, TUE, {
+        purpose: "  Printing a gearbox for the robotics club  ",
+      });
+      assert.equal(booking.purpose, "Printing a gearbox for the robotics club");
+    });
+
+    test('only true or "true" joins the waitlist: other values never queue the member', async () => {
+      await book(f.student);
+      // "false" was truthy before: it joined the waitlist.
+      for (const joinWaitlist of [false, "false", null, ""]) {
+        const err = await failure(book(f.student2, TUE, { joinWaitlist }));
+        assert.equal(err.code, "SLOT_TAKEN", JSON.stringify(joinWaitlist));
+      }
+      for (const joinWaitlist of ["yes", 1, "1", {}, ["true"]]) {
+        const err = await failure(book(f.student2, TUE, { joinWaitlist }));
+        assert.deepEqual(
+          [err.status, err.details],
+          [400, [{ path: "joinWaitlist", message: "Must be true or false." }]],
+          JSON.stringify(joinWaitlist),
+        );
+      }
+      assert.equal(await Booking.countDocuments({ status: "waitlisted" }), 0);
+
+      const joined = await book(f.student2, TUE, { joinWaitlist: "true" });
+      assert.deepEqual(
+        [joined.booking.status, joined.waitlistPosition],
+        ["waitlisted", 1],
+      );
+    });
+
+    test("an archived resource is 404 to check or request, except for its unit's managers", async () => {
+      const { booking } = await book(f.student);
+      await Resource.updateOne({ _id: f.printer._id }, { status: "archived" });
+      for (const who of [f.student2, f.cseManager]) {
+        for (const attempt of [
+          () =>
+            checkBooking(
+              who._id,
+              { resourceId: f.printer._id, ...TUE_LATER },
+              opts,
+            ),
+          () => book(who, TUE_LATER),
+        ]) {
+          const err = await failure(attempt());
+          assert.deepEqual(
+            [err.status, err.code, err.message],
+            [404, "NOT_FOUND", "Resource not found."],
+          );
+        }
+      }
+
+      // The unit's managers (and admins) still get the checklist, which says why.
+      for (const who of [f.manager, f.admin]) {
+        const check = await checkBooking(
+          who._id,
+          { resourceId: f.printer._id, ...TUE_LATER },
+          opts,
+        );
+        const rule = check.results.find((r) => r.rule === "RESOURCE_ACTIVE");
+        assert.deepEqual(
+          [check.outcome, rule.passed, rule.message],
+          ["ineligible", false, "This resource is no longer available."],
+        );
+      }
+      const refused = await failure(book(f.manager, TUE_LATER));
+      assert.equal(refused.code, "INELIGIBLE");
+
+      // A booking made before the archive can still be dealt with.
+      const cancelled = await transition(
+        booking._id,
+        "cancel",
+        f.student._id,
+        {},
+        opts,
+      );
+      assert.equal(cancelled.status, "cancelled");
     });
   });
 
@@ -708,6 +826,51 @@ describe("bookingService", { skip }, () => {
       );
     });
 
+    test("the pending queue reads at most 500 requests and says so in meta.capped", async () => {
+      // 501 pending requests on separate slots, each its own group, written straight to the
+      // collection: the service would refuse that many from three members.
+      const pendingAt = (i) => ({
+        resource: f.kits._id,
+        orgUnit: f.dic._id,
+        borrower: f.student._id,
+        start: plus(TUE.start, i * 60),
+        end: plus(TUE.start, i * 60 + 30),
+        purpose: "Inserted by hand for the test",
+        status: "pending",
+        createdAt: plus(NOW, -1000 + i),
+      });
+      await Booking.insertMany(
+        Array.from({ length: 500 }, (_, i) => pendingAt(i)),
+      );
+      const full = await listForManager(f.manager._id, { status: "pending" });
+      assert.deepEqual(full.meta, {
+        page: 1,
+        limit: 20,
+        total: 500,
+        capped: false,
+      });
+
+      await Booking.create(pendingAt(500));
+      const over = await listForManager(f.manager._id, {
+        status: "pending",
+        page: 25,
+      });
+      assert.deepEqual(over.meta, {
+        page: 25,
+        limit: 20,
+        total: 500,
+        capped: true,
+      });
+      // The oldest 500 are the ones shown; the newest waits for the queue to shrink.
+      assert.equal(
+        over.groups.at(-1).bookings[0].start.getTime(),
+        plus(TUE.start, 499 * 60).getTime(),
+      );
+      // Other statuses are a plain count, never capped.
+      const list = await listForManager(f.manager._id, { status: "approved" });
+      assert.equal("capped" in list.meta, false);
+    });
+
     test("list queries are checked: bad values are 400, limit is capped, an unknown user is 404", async () => {
       await book(f.student);
       const capped = await listMine(f.student._id, { limit: 500 });
@@ -782,6 +945,112 @@ describe("bookingService", { skip }, () => {
       assert.equal(
         (await failure(getTimeline(booking._id, f.student2._id))).code,
         "FORBIDDEN",
+      );
+    });
+  });
+
+  describe("malformed ids", () => {
+    // A :id from the URL or a resourceId from the body reaches the service as typed. Something that
+    // can't be an id names nothing, so it is 404 like an id that matches nothing, not a CastError
+    // (400 "_id") or an operator object reaching a query.
+    test("a booking or resource id that isn't an ObjectId is 404 NOT_FOUND", async () => {
+      const { booking } = await book(f.student);
+      const slot = { ...TUE, purpose: "Printing parts for the robotics club" };
+      const attempts = {
+        checkBooking: () =>
+          checkBooking(f.student._id, { ...slot, resourceId: "printer" }, opts),
+        createBooking: () => bookAs(f.student2, { _id: { $ne: null } }, TUE),
+        transition: () =>
+          transition("not-a-booking", "cancel", f.student._id, {}, opts),
+        checkIn: () =>
+          checkIn("not-a-booking", f.student._id, checklistOk(), opts),
+        checkOut: () =>
+          checkOut({ $gt: "" }, f.student._id, checklistOk(), opts),
+        confirmReturn: () =>
+          confirmReturn("not-a-booking", f.manager._id, { outcome: "ok" }),
+        getBooking: () => getBooking("not-a-booking", f.student._id),
+        getTimeline: () => getTimeline("1234", f.student._id),
+      };
+      for (const [name, attempt] of Object.entries(attempts)) {
+        const err = await failure(attempt());
+        assert.deepEqual(
+          [err.status, err.code],
+          [404, "NOT_FOUND"],
+          `${name}: ${err.message}`,
+        );
+      }
+      assert.equal(await Booking.countDocuments(), 1);
+      assert.equal(
+        (await Booking.findById(booking._id).lean()).status,
+        "pending",
+      );
+    });
+  });
+
+  describe("a failure after the booking update", () => {
+    // The booking is written first, then the audit entry. If that fails (a transient MongoDB error),
+    // the report and incident the booking now points to must stay: deleting them would leave a
+    // flagged booking that no incident resolution can ever close.
+    test("keeps the report and incident the booking points to", async (t) => {
+      const { booking } = await book(f.student);
+      await transition(booking._id, "approve", f.manager._id, {}, opts);
+      await checkIn(booking._id, f.student._id, checklistOk(), {
+        now: plus(TUE.start, -10),
+      });
+      await checkOut(booking._id, f.student._id, checklistOk(), {
+        now: TUE.end,
+      });
+      AuditLog.create = async () => {
+        throw new Error("connection reset");
+      };
+      t.after(() => delete AuditLog.create);
+      const err = await failure(
+        confirmReturn(
+          booking._id,
+          f.manager._id,
+          {
+            outcome: "issue",
+            ...checklistOk(),
+            incident: {
+              type: "damage",
+              severity: "low",
+              description: "The nozzle is cracked badly here",
+            },
+          },
+          { now: TUE.end },
+        ),
+      );
+      delete AuditLog.create;
+      assert.equal(err.message, "connection reset");
+      const saved = await Booking.findById(booking._id).lean();
+      assert.equal(saved.status, "flagged");
+      assert.equal(saved.incidents.length, 1);
+      assert.ok(await Incident.exists({ _id: saved.incidents[0] }));
+      assert.ok(
+        await ConditionReport.exists({ _id: saved.returnConfirmation.report }),
+      );
+    });
+
+    test("a refused update still removes what the request created", async () => {
+      const { booking } = await book(f.student);
+      await transition(booking._id, "approve", f.manager._id, {}, opts);
+      await checkIn(booking._id, f.student._id, checklistOk(), {
+        now: plus(TUE.start, -10),
+      });
+      // As if someone else moved it on meanwhile: the conditional update matches nothing.
+      const original = Booking.findOneAndUpdate;
+      Booking.findOneAndUpdate = function (...args) {
+        Booking.findOneAndUpdate = original;
+        return original.call(this, { _id: null }, ...args.slice(1));
+      };
+      const err = await failure(
+        checkOut(booking._id, f.student._id, checklistOk(), { now: TUE.end }),
+      );
+      Booking.findOneAndUpdate = original;
+      assert.equal(err.code, "INVALID_TRANSITION");
+      assert.equal(
+        await ConditionReport.countDocuments({ phase: "check_out" }),
+        0,
       );
     });
   });
