@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { ArrowRight, CheckCircle2, QrCode, Search, X } from 'lucide-react';
 import { FadeUp } from '../../components/Motion';
 import { Button } from '../../components/ui/Button';
-import { Spotlight } from '../../components/aceternity/Spotlight';
 import { MovingBorder } from '../../components/aceternity/MovingBorder';
 import { TextGenerateEffect } from '../../components/aceternity/TextGenerateEffect';
 import { GridPattern } from '../../components/magicui/GridPattern';
@@ -15,8 +14,8 @@ import { useMotionPause } from './motionPause';
 
 // The home page's hero: what ShareX is (a rotating word for what you can book), the search box (to
 // Explore; a signed-out visitor is asked to log in first, then lands on the results), quick searches
-// and the main call to action. Aceternity's Spotlight and Magic UI's grid behind it; on wide screens
-// an example booking card shows what a member sees.
+// and the main call to action. Magic UI's grid behind it; on wide screens an example booking card
+// shows what a member sees.
 
 const tagClass =
   'inline-flex items-center px-3 py-1.5 min-h-[40px] rounded border border-white/25 bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold transition-colors ' +
@@ -90,7 +89,6 @@ export function HeroSection({ user }) {
       className="relative isolate overflow-hidden rounded-2xl border-2 border-[#1a1a1a] bg-[#183d2d] p-6 text-white shadow-[6px_6px_0_#1a1a1a] sm:p-10"
     >
       <GridPattern className="text-white/[0.07]" />
-      <Spotlight className="-top-40 left-0 md:-top-24 md:left-40" fill="#f1c40f" />
 
       <div className="relative z-10 grid items-center gap-10 lg:grid-cols-[1.5fr_1fr]">
         <div className="space-y-5">
