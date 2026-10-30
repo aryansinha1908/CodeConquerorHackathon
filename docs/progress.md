@@ -1,4 +1,4 @@
-# CampusCommons: progress log
+# ShareX: progress log
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 

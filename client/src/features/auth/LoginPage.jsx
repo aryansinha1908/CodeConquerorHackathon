@@ -121,7 +121,7 @@ export default function LoginPage() {
   return (
     <AuthLayout
       title="Welcome back"
-      subtitle="Log in to CampusCommons"
+      subtitle="Log in to ShareX"
     >
       {/* Demo role switcher — only shown when DEMO_MODE */}
       {demoConfig?.demoMode && (
@@ -211,7 +211,7 @@ export default function LoginPage() {
 
         {/* Register link */}
         <p className="text-sm text-center text-[#1a1a1a]/70 font-mono">
-          New to CampusCommons?{' '}
+          New to ShareX?{' '}
           <Link
             to="/register"
             className="font-bold text-[#c0392b] underline underline-offset-2 hover:text-[#a93226]"

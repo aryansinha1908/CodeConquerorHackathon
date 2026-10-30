@@ -1,6 +1,6 @@
-# CampusCommons client
+# ShareX client
 
-The React SPA for CampusCommons (React 19, Vite 8, React Router 7, TanStack Query 5, Tailwind CSS 4).
+The React SPA for ShareX (React 19, Vite 8, React Router 7, TanStack Query 5, Tailwind CSS 4).
 
 - **Setup, scripts and demo logins:** the [repository README](../README.md).
 - **Pages, components and data fetching:** [`docs/frontend.md`](../docs/frontend.md).

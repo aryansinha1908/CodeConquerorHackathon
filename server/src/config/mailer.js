@@ -9,7 +9,7 @@
 import nodemailer from "nodemailer";
 import { log } from "../lib/log.js";
 
-const DEFAULT_FROM = "CampusCommons <no-reply@campuscommons.invalid>";
+const DEFAULT_FROM = "ShareX <no-reply@sharex.invalid>";
 
 let transport = null;
 let override = null;

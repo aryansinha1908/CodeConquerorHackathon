@@ -323,11 +323,11 @@ function proofMatches(given, user) {
 function emailCode(user, code) {
   sendMail({
     to: user.email,
-    subject: `${code} is your CampusCommons code`,
+    subject: `${code} is your ShareX code`,
     text: [
       "Hi,",
       "",
-      `Your CampusCommons verification code is ${code}. It expires in 10 minutes.`,
+      `Your ShareX verification code is ${code}. It expires in 10 minutes.`,
       "",
       "If you didn't ask for it, you can ignore this email: nothing happens without the code.",
     ].join("\n"),

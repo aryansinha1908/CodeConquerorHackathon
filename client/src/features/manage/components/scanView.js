@@ -34,7 +34,7 @@ export async function cameraPreflight(env = { isSecureContext: globalThis.isSecu
   }
 }
 
-/** Whether a decoded QR is a CampusCommons pass; anything else is ignored and scanning carries on. */
+/** Whether a decoded QR is a ShareX pass; anything else is ignored and scanning carries on. */
 export const isPassText = (text) => typeof text === 'string' && /^cc1\./.test(text.trim());
 
 /** What's typed in the code box → the code: capitals and digits only, at most 6. */

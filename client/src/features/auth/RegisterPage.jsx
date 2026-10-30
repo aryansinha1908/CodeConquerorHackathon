@@ -97,7 +97,7 @@ export default function RegisterPage() {
 
   return (
     <AuthLayout
-      title="Join CampusCommons"
+      title="Join ShareX"
       subtitle="Sign up with your NIT JSR college email"
     >
       <form

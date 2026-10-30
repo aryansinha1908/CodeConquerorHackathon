@@ -531,8 +531,8 @@ const sameInstant = (a, b) =>
   (b == null ? null : new Date(b).getTime());
 
 const MAIL = {
-  "verification.approved": "Your CampusCommons ID card is verified",
-  "verification.rejected": "Your CampusCommons ID card wasn't verified",
+  "verification.approved": "Your ShareX ID card is verified",
+  "verification.rejected": "Your ShareX ID card wasn't verified",
 };
 
 // backend.md §8.2: the member is also emailed, unless they turned email off. Not awaited: the

@@ -1,4 +1,4 @@
-# CampusCommons: Frontend Plan
+# ShareX: Frontend Plan
 
 > React 19 · Vite 8 · Tailwind CSS v4 · React Router 7 · TanStack Query 5 · Zustand · React Hook Form + Zod · framer-motion
 >
@@ -199,6 +199,7 @@ client/
 | `/login` | Login | Email and password; **demo role buttons** (DEMO_MODE); lockout countdown on 429 | `POST /auth/login`, `POST /auth/demo-login` | ✅ The buttons need `GET /auth/demo-config`, which is fetched once with no retry (F-03) |
 | `/register` | Register | Name, email (live `@nitjsr.ac.in` check + "Detected" chip), password strength | `POST /auth/register` | ✅ The "Detected" chip is live. The domain check is the server's, shown after submit |
 | `/verify-otp` | OTP | 6-box input with paste support; resend with countdown | `POST /auth/verify-otp`, `POST /auth/resend-otp` | ✅ Submits itself on the 6th digit |
+| `/` | Landing page (the teammate's home page) | Hero search, shortcuts, popular resources, units | `GET /resources` (signed in only) | ✅ Public since 30 Oct: a signed-out visitor gets the public layout (How it works, Log in, Sign up) and a sign-in panel instead of the inventory, with no API call but the session check; signed in, the app's layout (`app/layouts/HomeLayout.jsx`) |
 | `/how-it-works` | Transparency (FC-01) | Fair-use rules, waitlist, human review, privacy | static | ✅ Public, no API calls |
 
 ### 6.2 Member (logged in)

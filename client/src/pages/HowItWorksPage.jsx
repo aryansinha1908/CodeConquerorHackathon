@@ -63,11 +63,11 @@ export default function HowItWorksPage() {
       </a>
       <header className="border-b-2 border-[#1a1a1a] bg-[#f5f0e8]">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <Link to="/explore" className="flex items-center gap-2.5">
+          <Link to="/" className="flex items-center gap-2.5">
             <span className="w-9 h-9 bg-[#c0392b] border-2 border-[#1a1a1a] rounded-lg shadow-[2px_2px_0_#1a1a1a] flex items-center justify-center font-black text-white">
-              CC
+              SX
             </span>
-            <span className="text-base font-black tracking-tight">CampusCommons</span>
+            <span className="text-base font-black tracking-tight">ShareX</span>
           </Link>
           <Link
             to="/explore"
@@ -91,7 +91,7 @@ export default function HowItWorksPage() {
           </h1>
           <p className="text-sm text-white/90 leading-relaxed max-w-2xl">
             Departments and central facilities at NIT Jamshedpur share their spaces, equipment and computing
-            through CampusCommons. Every booking is checked against published rules, every decision has a
+            through ShareX. Every booking is checked against published rules, every decision has a
             reason you can read, and a person always has the last word on anything that affects you.
           </p>
         </FadeUp>
@@ -203,7 +203,7 @@ export default function HowItWorksPage() {
 
           <Section icon={ShieldCheck} title="An independent prototype">
             <p>
-              CampusCommons was built for a hackathon. It isn&apos;t affiliated with NIT Jamshedpur, and every seeded
+              ShareX was built for a hackathon. It isn&apos;t affiliated with NIT Jamshedpur, and every seeded
               person and item is fictional. The demo buttons on the sign-in page let you try each role without an
               account.
             </p>

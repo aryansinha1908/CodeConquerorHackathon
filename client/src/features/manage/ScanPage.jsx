@@ -255,7 +255,7 @@ export default function ScanPage() {
             </div>
             {notPass && camera.state === 'on' && (
               <p className="text-sm" role="status">
-                That QR isn&apos;t a CampusCommons pass. Point the camera at the pass on the borrower&apos;s booking page.
+                That QR isn&apos;t a ShareX pass. Point the camera at the pass on the borrower&apos;s booking page.
               </p>
             )}
             {camera.advice && (

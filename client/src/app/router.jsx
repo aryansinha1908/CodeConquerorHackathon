@@ -6,6 +6,7 @@ import { AppLayout } from './layouts/AppLayout';
 import { ManageLayout } from './layouts/ManageLayout';
 import { AdminLayout } from './layouts/AdminLayout';
 import { RequireAuth } from '../features/auth/RequireAuth';
+import { HomeLayout } from './layouts/HomeLayout';
 import { RequireRole } from '../features/auth/RequireRole';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 
@@ -83,6 +84,17 @@ export const router = createBrowserRouter([
     element: <ErrorBoundary>{page(<HowItWorksPage />)}</ErrorBoundary>,
   },
 
+  // The landing page: open to everyone. Signed-in visitors see it in the app's layout, everyone else
+  // in the public one (app/layouts/HomeLayout.jsx).
+  {
+    element: (
+      <ErrorBoundary>
+        <HomeLayout />
+      </ErrorBoundary>
+    ),
+    children: [{ path: '/', element: page(<HomePage />) }],
+  },
+
   // ── Authenticated App Shell ─────────────────────────────────────────────────
   {
     element: (
@@ -93,7 +105,6 @@ export const router = createBrowserRouter([
       </ErrorBoundary>
     ),
     children: [
-      { path: '/', element: page(<HomePage />) },
       { path: '/explore', element: page(<ExplorePage />) },
       { path: '/resources/:id', element: page(<ResourceDetailPage />) },
       { path: '/verification', element: page(<VerificationPage />) },

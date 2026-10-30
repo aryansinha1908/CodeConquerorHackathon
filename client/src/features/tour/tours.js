@@ -12,7 +12,7 @@ export const TOURS = [
     path: '/explore',
     title: 'Explore',
     steps: [
-      { title: 'Welcome to CampusCommons', text: 'Book spaces, equipment and computing across NIT Jamshedpur. This tour shows each page in a few steps; open it again any time with the ? button.' },
+      { title: 'Welcome to ShareX', text: 'Book spaces, equipment and computing across NIT Jamshedpur. This tour shows each page in a few steps; open it again any time with the ? button.' },
       { target: 'explore-search', title: 'Search the catalogue', text: 'Type what you need. Switch on "Ask in your own words" to let AI find matches for a description.' },
       { target: 'explore-categories', title: 'Filter by kind', text: 'Spaces, equipment, computing and tools. The unit menu narrows it to one department or facility.' },
       { target: 'explore-eligible', title: 'Only what you can book', text: 'Hides resources whose rules you don’t meet yet, such as a missing training badge.' },

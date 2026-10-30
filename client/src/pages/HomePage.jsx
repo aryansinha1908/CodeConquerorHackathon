@@ -100,11 +100,15 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
 
-  // Fetch featured resources (top 6 resources on campus)
-  const resourcesQuery = useResources({
-    category: activeCategory || undefined,
-    limit: 6,
-  });
+  // Fetch featured resources (top 6 resources on campus). Signed-in visitors only: the catalogue
+  // needs an account, and the landing page is open to everyone.
+  const resourcesQuery = useResources(
+    {
+      category: activeCategory || undefined,
+      limit: 6,
+    },
+    { enabled: Boolean(user) }
+  );
 
   const featuredItems = Array.isArray(resourcesQuery.data?.data)
     ? resourcesQuery.data.data
@@ -314,6 +318,7 @@ export default function HomePage() {
           </div>
 
           {/* Interactive Fast Category Switcher */}
+          {user && (
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
@@ -347,10 +352,44 @@ export default function HomePage() {
               All in Explore →
             </Link>
           </div>
+          )}
         </div>
 
+        {/* Signed out: the inventory needs an account */}
+        {!user && (
+          <div className="p-6 sm:p-8 bg-white rounded-xl border-2 border-[#1a1a1a] shadow-[4px_4px_0_#1a1a1a] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-sm font-black">Sign in to see what you can book</p>
+              <p className="text-xs text-[#1a1a1a]/75 max-w-xl">
+                Live availability, the rules for each resource and what you still need are shown to
+                members. Sign up with your @nitjsr.ac.in email.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center px-4 py-2 min-h-[40px] rounded-md border-2 border-[#1a1a1a] bg-white text-xs font-bold shadow-[2px_2px_0_#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]"
+              >
+                Log in
+              </Link>
+              <Link
+                to="/register"
+                className="inline-flex items-center justify-center px-4 py-2 min-h-[40px] rounded-md border-2 border-[#1a1a1a] bg-[#c0392b] text-white text-xs font-bold shadow-[2px_2px_0_#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b] focus-visible:ring-offset-2"
+              >
+                Create an account
+              </Link>
+              <Link
+                to="/how-it-works"
+                className="inline-flex items-center justify-center px-2 py-2 min-h-[40px] text-xs font-bold underline underline-offset-2 hover:text-[#c0392b]"
+              >
+                How it works
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Live Equipment Grid */}
-        {resourcesQuery.isPending && (
+        {user && resourcesQuery.isPending && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map((n) => (
               <div
@@ -393,7 +432,7 @@ export default function HomePage() {
             Streamlined Architecture
           </span>
           <h2 id="how-it-works-heading" className="text-xl sm:text-2xl font-black tracking-tight text-[#1a1a1a]">
-            How CampusCommons Eliminates Booking Friction
+            How ShareX Eliminates Booking Friction
           </h2>
           <p className="text-xs text-[#1a1a1a]/70">
             No paper forms, no manual approval bottlenecks, and no scheduling collisions.

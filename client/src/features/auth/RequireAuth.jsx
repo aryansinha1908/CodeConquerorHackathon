@@ -2,28 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
-import { refreshToken, getMe } from './api';
-
-// One boot at a time (frontend.md §8.1 step 1): the cookie rotates on every refresh, so StrictMode's
-// second effect run, or a second guard mounting, must wait on the same promise, not start another.
-let bootPromise = null;
-
-function ensureSession() {
-  if (!bootPromise) {
-    bootPromise = (async () => {
-      // POST /auth/refresh stores { accessToken, user }.
-      if (!useAuthStore.getState().accessToken) await refreshToken();
-      // GET /auth/me only when the session came without a user.
-      if (!useAuthStore.getState().user) {
-        const res = await getMe();
-        useAuthStore.getState().setUser(res.data);
-      }
-    })().finally(() => {
-      bootPromise = null;
-    });
-  }
-  return bootPromise;
-}
+import { ensureSession } from './session';
 
 export function RequireAuth({ children }) {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -67,7 +46,7 @@ export function RequireAuth({ children }) {
         <div className="bg-white border-2 border-[#1a1a1a] rounded-xl p-8 shadow-[4px_4px_0_#1a1a1a] text-center max-w-sm w-full">
           <div className="w-10 h-10 border-4 border-[#183d2d] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-sm font-bold text-[#1a1a1a]">VERIFYING SESSION</p>
-          <p className="text-xs text-[#1a1a1a]/60 mt-1">Connecting to CampusCommons...</p>
+          <p className="text-xs text-[#1a1a1a]/60 mt-1">Connecting to ShareX...</p>
         </div>
       </div>
     );

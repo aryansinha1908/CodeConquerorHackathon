@@ -1,6 +1,6 @@
-# CampusCommons: System Architecture
+# ShareX: System Architecture
 
-> **CampusCommons** (working name) lets departments and central facilities at **NIT Jamshedpur** share underused spaces, equipment and computing resources with verified students and faculty.
+> **ShareX** (working name) lets departments and central facilities at **NIT Jamshedpur** share underused spaces, equipment and computing resources with verified students and faculty.
 >
 > Stack: **MongoDB · Express · React · Node.js · Tailwind CSS**, plus Redis. As built: Express 5, Mongoose 9, React 19, Vite 8, Tailwind 4.
 >
@@ -29,7 +29,7 @@ This file is the design. Each major section now opens with a **Status:** line, c
 
 NIT Jamshedpur (Adityapur, Jamshedpur, Jharkhand 831014) has 12 academic departments, the Design and Innovation Centre, and several central facilities. Equipment and rooms owned by one unit often sit idle while students in another unit cannot get access. Typical examples are a 3D printer in the DIC, an oscilloscope in ECE, a GPU workstation in the Computer Centre, or a lathe in the Central Workshop. Buying or renting such items privately is too expensive for a student or a student startup.
 
-CampusCommons is a **campus-internal** sharing platform:
+ShareX is a **campus-internal** sharing platform:
 
 - Only people with an `@nitjsr.ac.in` email can join.
 - Every account is confirmed by a human who checks a **student or faculty ID card**.

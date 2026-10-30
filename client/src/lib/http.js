@@ -7,7 +7,9 @@ const http = axios.create({
 });
 
 // Pages where a failed refresh must not bounce the user again (they are the way back in).
-const PUBLIC_AUTH_PATHS = ['/login', '/register', '/verify-otp'];
+// Pages a failed session never sends to /login: the auth pages, and the public landing and How it
+// works pages (a signed-out visitor stays on them).
+const PUBLIC_AUTH_PATHS = ['/login', '/register', '/verify-otp', '/', '/how-it-works'];
 
 // /auth/* calls answer for themselves: a 401 from /auth/refresh must not wait on another refresh,
 // and INVALID_CREDENTIALS / EMAIL_NOT_VERIFIED belong to the form that sent them.

@@ -1,4 +1,4 @@
-# Deploying CampusCommons
+# Deploying ShareX
 
 A checklist for putting the app on the internet: the API on **Render**, the SPA on **Vercel**, data in **MongoDB Atlas**, Redis on **Upstash**, files on **Cloudinary**, email through **Brevo** or a **Gmail app password**, and the AI features on **Google Gemini**. Work through it top to bottom; each step says what to copy into the next.
 
@@ -55,7 +55,7 @@ Keep the values you collect in a password manager, or in `server/.env.production
 
 ## 1. MongoDB Atlas
 
-- [ ] **Cluster.** New project (e.g. "CampusCommons") → **Create** → **M0 (Free)** → AWS → **ap-southeast-1 (Singapore)**, or the nearest region M0 offers (Mumbai, `ap-south-1`). Name it e.g. `campuscommons`.
+- [ ] **Cluster.** New project (e.g. "ShareX") → **Create** → **M0 (Free)** → AWS → **ap-southeast-1 (Singapore)**, or the nearest region M0 offers (Mumbai, `ap-south-1`). Name it e.g. `campuscommons`.
 - [ ] **Database user.** Security → **Database Access** → Add New Database User:
   - Authentication: password. Username e.g. `campuscommons-api`.
   - **Autogenerate Secure Password**: letters and digits only, so nothing in the URI needs escaping. A password you choose must have `@ : / ? # [ ] %` percent-encoded in the URI.
@@ -142,14 +142,14 @@ Email carries the OTP codes for registration and the ID-verification decisions. 
   | `SMTP_PORT` | `2525` on Render's free plan, `587` elsewhere |
   | `SMTP_USER` | the SMTP login from that page                 |
   | `SMTP_PASS` | the SMTP key (not the API key)                |
-  | `MAIL_FROM` | `CampusCommons <the verified sender>`         |
+  | `MAIL_FROM` | `ShareX <the verified sender>`         |
 
   The free plan sends about 300 emails a day.
 
 ### Option B: Gmail app password (paid Render instance only)
 
 - [ ] Use a team Google account, not a personal one: its address is on every email. Turn on **2-Step Verification**, then create an app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Copy the 16 characters without spaces.
-- [ ] Values: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=<the Gmail address>`, `SMTP_PASS=<the app password>`, `MAIL_FROM=CampusCommons <the same Gmail address>` (Gmail rewrites any other From). About 500 emails a day.
+- [ ] Values: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=<the Gmail address>`, `SMTP_PASS=<the app password>`, `MAIL_FROM=ShareX <the same Gmail address>` (Gmail rewrites any other From). About 500 emails a day.
 
 Port 465 means TLS from the start; every other port upgrades with STARTTLS (`server/src/config/mailer.js`). The API also caps how many codes it emails a day (`server/src/middleware/rateLimit.js`), below the free plans' quotas.
 

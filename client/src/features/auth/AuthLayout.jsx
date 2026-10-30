@@ -51,15 +51,18 @@ export function AuthLayout({ title, subtitle, children }) {
 
         {/* Logo / wordmark */}
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-3">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-3 mb-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
             <div className="w-10 h-10 bg-[#c0392b] border-2 border-white/30 rounded-lg flex items-center justify-center font-bold text-lg">
-              CC
+              SX
             </div>
             <div>
               <p className="text-xs uppercase tracking-widest text-white/60">NIT Jamshedpur</p>
-              <p className="text-lg font-bold leading-tight">CampusCommons</p>
+              <p className="text-lg font-bold leading-tight">ShareX</p>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Tagline */}

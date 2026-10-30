@@ -1,4 +1,4 @@
-# Render Blueprint for the CampusCommons API (server/). Step-by-step setup: docs/deploy.md.
+# Render Blueprint for the ShareX API (server/). Step-by-step setup: docs/deploy.md.
 #
 # Render → New → Blueprint → pick this repository. Render creates the web service below, asks for
 # every `sync: false` value, and makes the `generateValue` secrets itself (they never leave Render).
@@ -106,7 +106,7 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
-      # A sender Brevo has verified, or the Gmail address itself, e.g. CampusCommons <you@example.com>.
+      # A sender Brevo has verified, or the Gmail address itself, e.g. ShareX <you@example.com>.
       - key: MAIL_FROM
         sync: false
 

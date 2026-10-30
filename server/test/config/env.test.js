@@ -38,7 +38,7 @@ const complete = () => ({
   GEMINI_API_KEY: "gemini-key-value",
   SMTP_USER: "smtp-user-value",
   SMTP_PASS: "smtp-pass-value",
-  MAIL_FROM: "CampusCommons <codes@example.com>",
+  MAIL_FROM: "ShareX <codes@example.com>",
 });
 
 function assertNoValues(env, result) {

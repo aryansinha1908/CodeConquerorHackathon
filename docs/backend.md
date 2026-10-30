@@ -1,4 +1,4 @@
-# CampusCommons: Backend Plan
+# ShareX: Backend Plan
 
 > Node.js 22 · Express 5 · MongoDB (Mongoose 9) · Redis (ioredis 5) · JWT · Cloudinary · Nodemailer · node-cron · pino. (Zod was planned and isn't used: see §7.)
 >

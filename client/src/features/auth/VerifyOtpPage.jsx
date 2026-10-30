@@ -128,7 +128,7 @@ export default function VerifyOtpPage() {
       const res = await verifyOtp({ email, otp: code });
       const { accessToken, user } = res.data;
       setSession(accessToken, user);
-      toast.success('Email verified! Welcome to CampusCommons.');
+      toast.success('Email verified! Welcome to ShareX.');
       navigate('/verification', { replace: true });
     } catch (err) {
       // Reset digits so user can re-enter cleanly

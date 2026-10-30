@@ -1,4 +1,4 @@
-# CampusCommons: demo and testing guide
+# ShareX: demo and testing guide
 
 How to try every feature that is built, by hand, in the browser. Each section says who to sign in as, where to click and what you should see. Times are in IST everywhere.
 
@@ -31,7 +31,7 @@ cd client && npm run dev      # app on http://localhost:5173
 Then:
 
 - <http://localhost:5000/health> should say `"mongo":"up","redis":"up"`.
-- Open <http://localhost:5173>.
+- Open <http://localhost:5173>: the ShareX landing page, open without signing in. **Log in** at the top right leads to the demo buttons.
 - To switch users, click your name at the right of the header → **Log out**, then press another demo button.
 - To have two people signed in at once, use a second browser or a private window.
 

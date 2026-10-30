@@ -1,6 +1,6 @@
-# CampusCommons
+# ShareX
 
-CampusCommons lets departments and central facilities at **NIT Jamshedpur** share underused spaces, equipment and computing resources with verified students and faculty. Only `@nitjsr.ac.in` addresses can join, a human checks every student or faculty ID card, and every resource carries its own eligibility rules (training badges, member type, department), approval mode and fair-usage limits. Every booking then moves through an auditable lifecycle, from request to return confirmation.
+ShareX lets departments and central facilities at **NIT Jamshedpur** share underused spaces, equipment and computing resources with verified students and faculty. Only `@nitjsr.ac.in` addresses can join, a human checks every student or faculty ID card, and every resource carries its own eligibility rules (training badges, member type, department), approval mode and fair-usage limits. Every booking then moves through an auditable lifecycle, from request to return confirmation.
 
 On top of that: a refreshing **QR booking pass** the unit scans at pickup and return; **AI search** ("something to print a phone case") and an **AI before/after photo comparison** at the return, both with Google Gemini and both only suggestions; an **ID-card check that runs on the member's own device**, so the card never goes to an AI company; and a public **How it works** page with a **guided tour** of each page.
 

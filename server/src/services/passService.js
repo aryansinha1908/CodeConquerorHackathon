@@ -44,7 +44,7 @@ const NEXT_ACTION = [
   ["confirmOk", "confirm_return"],
 ];
 
-const NOT_A_PASS = "That isn't a valid CampusCommons booking pass.";
+const NOT_A_PASS = "That isn't a valid ShareX booking pass.";
 const UNKNOWN_CODE = "That code isn't valid, or it has expired. Ask the borrower for the code on their pass now.";
 
 function passKey() {
