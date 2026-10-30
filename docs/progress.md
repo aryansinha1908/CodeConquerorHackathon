@@ -373,8 +373,14 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
    - **Tests:** 827 server tests with MongoDB (356 + 2 skipped without), 374 client tests.
 
 **Open, in priority order:**
-1. **Set `GEMINI_API_KEY`** in `server/.env` and on Render (`docs/deploy.md` §3b), then try AI search and the photo comparison against the real API. Every AI test so far used a fake Gemini, and the photo comparison needs real handover photos.
-   - **Check once on the deployed site:** that the admin's "Check on this device" loads a real card. Cloudinary's Download API is assumed to answer with the image, or one redirect to it within the account; the server reads the type from the bytes either way.
+1. **Live-tested on 30 Oct** (real Gemini, real Cloudinary; the throwaway database and an in-memory Redis, never Atlas or Upstash):
+   - AI search picked the right resources with sensible reasons in about 2 seconds, and repeats came from the cache.
+   - The photo comparison read drawn before/after printer photos correctly: damage, no change, and "not comparable" for another object. Once, it also invented a missing spool, so a person checking still matters.
+   - The admin's "Check on this device" loaded a real card through Cloudinary's download link.
+   - One Google 503 ("overloaded") showed that such failures were charged; they are refunded now (`91f331d`).
+   - The test card and photos were deleted from Cloudinary afterwards.
+   - **Still to do:** set `GEMINI_API_KEY` on Render, if it isn't there (the AI box then says "AI isn't set up").
+2. **Main was a blank page on Vercel** (since PR #19, `c9da407`), though the builds passed: `t is not a function`. Rolldown put its CommonJS helpers in an app chunk that loads after React. Fixed with `output.strictExecutionOrder` (`8a60a5f`). Main was then fast-forwarded to `Aryan` and pushed on 30 Oct; Vercel deployed it, and Render serves the new API.
    - The dead teammate files (`features/bookings/components/BookingPanel.jsx`, `CheckInOutWizard.jsx`, `BookingTimeline.jsx`, `features/manage/ReviewQueuePage.jsx`) are unused and hold the remaining lint warnings.
 2. **Deploying, with your accounts:** follow `docs/deploy.md`.
    - Generate **new** JWT secrets and OTP pepper, because the old ones leaked in early commits.
