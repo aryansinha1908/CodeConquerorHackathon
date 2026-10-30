@@ -147,7 +147,7 @@ What's built, and when: [`progress.md`](./progress.md). How to try each feature 
 | HTTP | **axios** | Interceptors for the bearer token, refresh and error normalisation. The base URL is fixed at `/api/v1` (`lib/http.js`), so **the client has no environment variables**. Vite's proxy forwards `/api` in development, and the rewrite in `client/vercel.json` does it on Vercel |
 | Dates | **date-fns + date-fns-tz** | IST formatting. *As built, both are installed but nothing imports them. The IST helpers in `lib/time.js` use the fixed +05:30 offset and `Intl.DateTimeFormat`* |
 | Toasts | **sonner** | |
-| Motion | **framer-motion** | Page and list entrances, menu and dialog openings, sliding active indicators. Opacity and transform only; `<MotionConfig reducedMotion="user">` drops the movement for reduce-motion users. Presets in `lib/motion.js`, `StaggerList` / `StaggerItem` / `FadeUp` in `components/Motion.jsx` |
+| Motion | **framer-motion** | Page and list entrances, menu and dialog openings, sliding active indicators. Opacity and transform only; `<MotionConfig reducedMotion="user">` drops the movement for reduce-motion users. Presets in `lib/motion.js`, `StaggerList` / `StaggerItem` / `FadeUp` in `components/Motion.jsx`. The home page also uses copies of Magic UI and Aceternity UI components (`components/magicui`, `components/aceternity`): copied in, not installed, since neither is an npm package |
 | Images | **browser-image-compression** | Photos ≤ 1 MB / 1600 px before upload (saves Cloudinary quota and mobile data) |
 
 ---
@@ -181,10 +181,10 @@ client/
 ```
 
 **As built** (🟡 the layout differs from the plan above):
-- `pages/` holds `ExplorePage`, `ResourceDetailPage`, `HowItWorksPage`, the teammate's `HomePage`, and `Placeholders`. Every other page lives in its feature folder (e.g. `features/bookings/MyBookingsPage.jsx`) and is lazy-loaded through `components/LazyPages.jsx`.
+- `pages/` holds `ExplorePage`, `ResourceDetailPage`, `HowItWorksPage`, `HomePage` (which puts together the sections in `features/home/`), and `Placeholders`. Every other page lives in its feature folder (e.g. `features/bookings/MyBookingsPage.jsx`) and is lazy-loaded through `components/LazyPages.jsx`.
 - `features/` has `auth`, `verification`, `resources` (with the eligibility checklist), `bookings` (with the condition-report steps), `incidents`, `notifications`, `manage` (dashboard, listing form, badge queue), `admin` (verification queue, audit log), `profile` and `uploads`. There are no `eligibility/`, `condition/`, `badges/` or `audit/` folders, and no per-feature `schemas.js`.
 - `app/layouts/` has `AppLayout`, `ManageLayout` and `AdminLayout`. The auth pages use `features/auth/AuthLayout.jsx` instead of a `PublicLayout`.
-- `components/ui/` has Badge, Button, Card, ConfirmDialog, Dialog, EmptyState, ErrorBoundary, ErrorState, Input, Pagination, ReasonDialog, Select, Skeleton and StatusBadge. There is no Tabs or DataTable. `components/` also holds `PhotoUploader`, `BookingTimeline`, `NotificationBell`, `UserMenu`, `AccountFace`, `Motion` and `LazyPages`.
+- `components/ui/` has Badge, Button, Card, ConfirmDialog, Dialog, EmptyState, ErrorBoundary, ErrorState, Input, Pagination, ReasonDialog, Select, Skeleton and StatusBadge. There is no Tabs or DataTable. `components/` also holds `PhotoUploader`, `BookingTimeline`, `NotificationBell`, `UserMenu`, `AccountFace`, `Motion` and `LazyPages`, plus the home page's JavaScript copies of Magic UI (`components/magicui/`) and Aceternity UI (`components/aceternity/`) components.
 - `lib/schemas/` holds only `auth.js`. `lib/` also has `motion.js`, `errors.js`, `bookingStatus.js`, `reason.js`, `paging.js`, `staleChunk.js` and `utils.js`.
 - `client/vercel.json` also sets the CSP and the security headers.
 
@@ -199,7 +199,7 @@ client/
 | `/login` | Login | Email and password; **demo role buttons** (DEMO_MODE); lockout countdown on 429 | `POST /auth/login`, `POST /auth/demo-login` | ✅ The buttons need `GET /auth/demo-config`, which is fetched once with no retry (F-03) |
 | `/register` | Register | Name, email (live `@nitjsr.ac.in` check + "Detected" chip), password strength | `POST /auth/register` | ✅ The "Detected" chip is live. The domain check is the server's, shown after submit |
 | `/verify-otp` | OTP | 6-box input with paste support; resend with countdown | `POST /auth/verify-otp`, `POST /auth/resend-otp` | ✅ Submits itself on the 6th digit |
-| `/` | Landing page (the teammate's home page) | Hero search, shortcuts, popular resources, units | `GET /resources` (signed in only) | ✅ Public since 30 Oct: a signed-out visitor gets the public layout (How it works, Log in, Sign up) and a sign-in panel instead of the inventory, with no API call but the session check; signed in, the app's layout (`app/layouts/HomeLayout.jsx`) |
+| `/` | Landing page | Hero search, units marquee, facts, shortcuts, live inventory, feature bento, lifecycle timeline, roles, units, use cases, FAQ, call to action (`features/home/`) | `GET /resources` (signed in only) | ✅ Public since 30 Oct: a signed-out visitor gets the public layout (How it works, Log in, Sign up) and a sign-in panel instead of the inventory, with no API call but the session check; signed in, the app's layout (`app/layouts/HomeLayout.jsx`). 🟡 The richer version (Aceternity UI and Magic UI components, a "Pause animations" switch) is on `Aryan`, not yet on `main` |
 | `/how-it-works` | Transparency (FC-01) | Fair-use rules, waitlist, human review, privacy | static | ✅ Public, no API calls |
 
 ### 6.2 Member (logged in)

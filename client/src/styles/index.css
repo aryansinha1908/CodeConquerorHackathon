@@ -38,6 +38,29 @@
   --shadow-card-hover: 6px 6px 0px 0px #1a1a1a;
   --shadow-btn: 3px 3px 0px 0px #1a1a1a;
   --shadow-btn-hover: 1px 1px 0px 0px #1a1a1a;
+
+  /* ── Animations for the home page's Magic UI and Aceternity components (components/magicui,
+     components/aceternity). Each one is switched off under prefers-reduced-motion where it's used. */
+  --animate-marquee: marquee var(--duration, 40s) linear infinite;
+  --animate-border-spin: border-spin var(--duration, 6s) linear infinite;
+  --animate-shimmer-sweep: shimmer-sweep 2.8s ease-in-out infinite;
+  --animate-spotlight: spotlight 2s ease 0.6s 1 forwards;
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(-100% - var(--gap, 1rem))); }
+  }
+  @keyframes border-spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes shimmer-sweep {
+    0% { transform: translateX(-160%) skewX(-20deg); }
+    60%, 100% { transform: translateX(360%) skewX(-20deg); }
+  }
+  @keyframes spotlight {
+    0% { opacity: 0; transform: translate(-72%, -62%) scale(0.5); }
+    100% { opacity: 1; transform: translate(-50%, -40%) scale(1); }
+  }
 }
 
 /* ── Global resets ── */

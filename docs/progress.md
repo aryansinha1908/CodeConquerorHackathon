@@ -2,7 +2,7 @@
 
 The running record of what's built, what was decided and what's left. Read this first when picking up the work. The design itself lives in [`architecture.md`](./architecture.md), [`backend.md`](./backend.md) and [`frontend.md`](./frontend.md).
 
-**Last updated:** 29 Oct 2026. **Branch:** `Aryan`. `main` has everything through PR #11 (`a78df37`, the frontend layouts). **The frontend and backend are integrated**: all five phases (§11), the local-setup fixes (`b9005b3`) and the UI fixes from the first review (§11, step 6) are committed locally on `Aryan` and **not pushed** (`origin/Aryan` is still at `4533665`). The judge script passes end to end (`npm run golden-path`).
+**Last updated:** 30 Oct 2026. **Branch:** `Aryan`. `main` is at `0890229` (the public landing page and the ShareX name), deployed on Vercel and Render. `Aryan` is one commit ahead with the richer home page, pushed to `origin/Aryan` and **not merged into `main`** (§11, "Open", item 4). The judge script passes end to end (`npm run golden-path`).
 
 **Resume here:** §11's "Open" list, after fixing the local setup below.
 
@@ -382,13 +382,19 @@ The goal is the judge script (`frontend.md` §11) working on localhost with real
    - **Still to do:** set `GEMINI_API_KEY` on Render, if it isn't there (the AI box then says "AI isn't set up").
 2. **Main was a blank page on Vercel** (since PR #19, `c9da407`), though the builds passed: `t is not a function`. Rolldown put its CommonJS helpers in an app chunk that loads after React. Fixed with `output.strictExecutionOrder` (`8a60a5f`). Main was then fast-forwarded to `Aryan` and pushed on 30 Oct; Vercel deployed it, and Render serves the new API.
    - The dead teammate files (`features/bookings/components/BookingPanel.jsx`, `CheckInOutWizard.jsx`, `BookingTimeline.jsx`, `features/manage/ReviewQueuePage.jsx`) are unused and hold the remaining lint warnings.
-2. **Deploying, with your accounts:** follow `docs/deploy.md`.
+3. **The landing page and the name** (`0890229`, on `main`): `/` is open to everyone. A visitor gets the public layout (`app/layouts/HomeLayout.jsx`) and a sign-in panel instead of the live inventory, with no API call but the session check. CampusCommons is now **ShareX** in every name people see; lowercase identifiers (the demo email domain, the Cloudinary folders, the Render service, the database name, storage keys) were kept so nothing deployed breaks.
+4. **A richer home page, on `Aryan` only:** more content, built with framer-motion and JavaScript copies of Aceternity UI and Magic UI components (`components/aceternity`, `components/magicui`), restyled to the app's look. The sections are in `features/home/` and all their copy in `features/home/homeContent.js`.
+   - **Sections:** hero with search, units marquee, facts, shortcuts, live inventory, a feature bento, the six-step lifecycle, roles, units, use cases, FAQ, call to action.
+   - **Accessibility:** a "Pause animations" switch stops everything that loops (WCAG 2.2.2). Under reduced motion nothing moves, and the marquees wrap into plain lists. Tap targets are at least 40 px. The rotating hero word doesn't shift the layout.
+   - **Checked:** a review pass (copy matched to what the app really does), 382 client tests, lint, build, and browser checks at 1280, 390 and 320 px, with and without reduced motion.
+   - **To do:** merge `Aryan` into `main` if it looks right on a preview.
+5. **Deploying, with your accounts:** follow `docs/deploy.md`.
    - Generate **new** JWT secrets and OTP pepper, because the old ones leaked in early commits.
    - Render's free plan blocks the usual SMTP ports, so use Brevo on port 2525.
    - `render.yaml` deploys `main`, so merge `Aryan` first.
    - Run `npm run seed`, then `npm run golden-path -- <api url>`, then `npm run seed` again.
-3. **A shared secret between Vercel and Render.** A client calling the Render URL directly can forge `X-Forwarded-For` to dodge the per-IP ceilings and use up the daily OTP-email cap. The fix is Vercel Routing Middleware adding a secret header that the server checks.
-4. **The demo admin's reach (decision).** The boot warning is in place. Keep the judged instance demo-only, or scope demo staff accounts to demo data.
-5. **After this plan:** `/admin/users` and `/admin/org-units` pages (the `GET /admin/users` API exists), `/profile`, email for booking events (B-18), a badge revoke action, then the cool-to-have features.
+6. **A shared secret between Vercel and Render.** A client calling the Render URL directly can forge `X-Forwarded-For` to dodge the per-IP ceilings and use up the daily OTP-email cap. The fix is Vercel Routing Middleware adding a secret header that the server checks.
+7. **The demo admin's reach (decision).** The boot warning is in place. Keep the judged instance demo-only, or scope demo staff accounts to demo data.
+8. **After this plan:** `/admin/users` and `/admin/org-units` pages (the `GET /admin/users` API exists), `/profile`, email for booking events (B-18), a badge revoke action, then the cool-to-have features.
 
 **Deferred from Phase 1 (decisions needed):** the documented "never key a rate limit on IP" rule leaves two gaps. (a) Rotating email addresses gets unlimited register/OTP emails and bcrypt work. (b) About 60 scripted demo-login requests per role lock the judges out for 15 minutes. The proposed fix is a coarse per-IP ceiling stacked on the existing per-email and per-role limits, plus a global daily OTP-mail cap and `app.set('trust proxy', 1)` for Render.
